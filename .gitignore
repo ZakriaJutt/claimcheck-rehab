@@ -1,0 +1,26 @@
+# Environments and secrets
+.venv/
+**/.venv/
+.env
+.env.*
+!.env.example
+# Node
+node_modules/
+**/node_modules/
+# Caches and build output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+*.egg-info/
+build/
+dist/
+.next/
+coverage/
+# Local data and run state (never commit exports or generated data)
+.run/
+*.log
+*.xlsx
+local-data/
