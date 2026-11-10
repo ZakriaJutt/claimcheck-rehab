@@ -49,6 +49,7 @@ def next_item(
     on_date: date,
     visit: VisitIn | None = None,
     export_newer_than_outcome: bool = False,
+    had_outcome: bool = False,
 ) -> tuple[ItemState | None, list[str]]:
     """Return the new item state (None = no item) and the item_event kinds to append."""
     if res.outcome == "flag":
@@ -76,10 +77,12 @@ def next_item(
     if existing is None or res.outcome == "not_evaluated":
         return existing, []
     # res.outcome == "clear"
+    worked = existing.status == "awaiting_confirmation" or (existing.status == "open" and had_outcome)
+    if worked:
+        # An item staff acted on is confirmed by a later export that clears it (MH-07 b, c, e).
+        if export_newer_than_outcome and _confirmable(existing.rule_code, visit):
+            return replace(existing, status="confirmed", version=existing.version + 1), ["confirmed"]
+        return existing, []
     if existing.status == "open":
         return replace(existing, status="auto_cleared", version=existing.version + 1), ["auto_cleared"]
-    if existing.status == "awaiting_confirmation" and export_newer_than_outcome and _confirmable(
-        existing.rule_code, visit
-    ):
-        return replace(existing, status="confirmed", version=existing.version + 1), ["confirmed"]
     return existing, []

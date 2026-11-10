@@ -150,7 +150,7 @@ def test_ut07_icbc_fee_rule() -> None:
 
 
 def test_ut08_wsbc_combination_injury_count_and_fee() -> None:
-    c = claim(payer="WSBC", date_of_event=D("2026-05-01"), policy_status="Open",
+    c = claim(payer="WSBC", date_of_event=D("2026-05-01"), policy_status="open",
               next_appointment_date=D("2026-08-30"))
     a = visit(payer="WSBC", claim_id=c.id, billing_code="19100", amount_invoiced="196.00",
               date_of_service="2026-06-30", submission_state="paid", amount_paid="196.00")  # 60 days
@@ -166,7 +166,7 @@ def test_ut08_wsbc_combination_injury_count_and_fee() -> None:
     r = result(run([late], [c], on="2026-07-05"), late.id, "WSBC-06")
     assert (r.outcome, r.money_class) == ("flag", "warning")
 
-    c2 = claim(payer="WSBC", end_date=None, policy_status="Open", next_appointment_date=D("2026-08-30"))
+    c2 = claim(payer="WSBC", end_date=None, policy_status="open", next_appointment_date=D("2026-08-30"))
     visits = [visit(payer="WSBC", claim_id=c2.id, billing_code="19102", amount_invoiced="95.00",
                     submission_state="paid", amount_paid="95.00",
                     date_of_service=date(2026, 7, 1) + timedelta(days=3 * i)) for i in range(11)]
@@ -250,7 +250,7 @@ def test_ut17_jane_submitted_never_reads_clear_on_icbc_01() -> None:
 
 
 def test_ut18_support_sessions_count() -> None:
-    c = claim(payer="WSBC", policy_status="Open", next_appointment_date=D("2026-08-30"))
+    c = claim(payer="WSBC", policy_status="open", next_appointment_date=D("2026-08-30"))
     treat = [visit(payer="WSBC", claim_id=c.id, billing_code="19102", amount_invoiced="95.00",
                    date_of_service=date(2026, 7, 1) + timedelta(days=3 * i)) for i in range(9)]
     support = [visit(payer="WSBC", claim_id=c.id, billing_code="19108", amount_invoiced="65.00",
@@ -259,7 +259,7 @@ def test_ut18_support_sessions_count() -> None:
     r = result(run(treat + support, [c], on="2026-08-05"), c.id, "WSBC-07")
     assert (r.outcome, r.reason, r.money_class) == ("flag", "treatment_visits_over_maximum", "warning")
 
-    c2 = claim(payer="WSBC", policy_status="Open", next_appointment_date=D("2026-08-30"))
+    c2 = claim(payer="WSBC", policy_status="open", next_appointment_date=D("2026-08-30"))
     a = visit(payer="WSBC", claim_id=c2.id, billing_code="19102", amount_invoiced="95.00",
               date_of_service="2026-07-10", invoice_ref="S-A1")
     b = visit(payer="WSBC", claim_id=c2.id, billing_code="19107", amount_invoiced="70.00",
@@ -284,7 +284,7 @@ def test_ut19_hand_therapy_effective_date_and_no_rule_version() -> None:
 
 def test_ut19_every_rule_on_2026_03_15_is_not_evaluated() -> None:
     ic = claim(date_of_event=D("2026-03-01"), end_date=D("2026-06-01"), treatments_count=3, policy_max=25)
-    wc = claim(payer="WSBC", date_of_event=D("2026-03-01"), policy_status="Open",
+    wc = claim(payer="WSBC", date_of_event=D("2026-03-01"), policy_status="open",
                next_appointment_date=D("2026-03-20"))
     vi = visit(claim_id=ic.id, date_of_service="2026-03-15", submission_state="paid", amount_paid="97.00")
     vw = visit(payer="WSBC", claim_id=wc.id, billing_code="19102", amount_invoiced="95.00",

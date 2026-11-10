@@ -360,7 +360,7 @@ def wsbc_09(c: ClaimIn, visits: list[VisitIn], ver: RuleVersionIn, ctx: Context)
         return _clear(code, ver)
     if c.policy_status is None and c.next_appointment_date is None:
         return _ne(code, ver, R_MISSING_POLICY_STATUS)
-    closed = (c.policy_status or "").strip().lower() in {"closed", "discharged", "inactive"}
+    closed = c.policy_status == "closed"
     last = max(v.date_of_service for v in visits)
     idle = c.next_appointment_date is None and days_since(last, ctx.on_date) >= p["idle_days"]
     if closed or idle:

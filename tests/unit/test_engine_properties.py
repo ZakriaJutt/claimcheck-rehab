@@ -26,7 +26,7 @@ def rowsets(draw: st.DrawFn) -> tuple[list[VisitIn], list[ClaimIn], date]:
                       policy_max=draw(st.none() | st.integers(10, 40)),
                       date_of_event=draw(st.none() | st.dates(date(2026, 1, 1), date(2026, 11, 1))),
                       end_date=draw(st.none() | st.dates(date(2026, 3, 1), date(2027, 3, 1))),
-                      policy_status=draw(st.none() | st.sampled_from(["Open", "Closed"])),
+                      policy_status=draw(st.none() | st.sampled_from(["open", "closed"])),
                       next_appointment_date=draw(st.none() | st.dates(date(2026, 4, 1), date(2027, 1, 1))))
               for i in range(n_claims)]
     visits = []
