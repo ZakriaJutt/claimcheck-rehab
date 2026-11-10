@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Stop the processes started by scripts/dev.sh.
+cd "$(dirname "$0")/.."
+for p in api worker; do
+  [ -f ".run/$p.pid" ] && kill "$(cat ".run/$p.pid")" 2>/dev/null; rm -f ".run/$p.pid"
+done
+exit 0
