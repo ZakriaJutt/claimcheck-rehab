@@ -239,6 +239,8 @@ The chat estimated 120 hours and 15 days `[C]`. The difference is the in-browser
 
 ## Proposed scripts
 
+B1 status (2026-11-11): `make dev` (as `scripts/dev.sh`), `scripts/check_migrations.py` and a rule-publication script `scripts/publish_rules.py` exist; the other rows remain proposed. See [AGENTS.md](AGENTS.md#commands-b1).
+
 | Script (proposed) | Purpose | Inputs | Outputs | Failure behaviour |
 |---|---|---|---|---|
 | `make dev` | Start database, run migrations, start API, worker, web, mail catcher | `.env.local` | Health summary | Stops and names the first unhealthy service |
@@ -259,7 +261,7 @@ All fixtures are synthetic. The base fixture is "Harbourview Physio": 1,184 visi
 |---|---|---|
 | UT-01 | ICBC visit, service 2026-10-01, unsubmitted; evaluate on 10-14, 10-15, 11-01, 11-15, 11-16 | Clear; flag (limit 2026-11-15, submit by 11-14, delayed cash, not near-limit); near-limit date written as 11-01 (day 31); still delayed cash; discretionary permanent loss |
 | UT-02 | WorkSafeBC visit, service 2026-07-01, unsubmitted | Limit 2026-09-29, submit by 09-28 |
-| UT-03 | WorkSafeBC visit, service 2026-03-01, rejected; first rejection 2026-08-20, then unknown | Limit 2026-11-18; with unknown date, limit 2026-08-28 |
+| UT-03 | WorkSafeBC visit, service 2026-05-01, rejected; first rejection 2026-08-20, then unknown | Limit 2026-11-18; with unknown date, limit 2026-10-28. (Corrected in B1, 2026-11-11: the earlier service date 2026-03-01 lies before the loaded WorkSafeBC versions, so the engine must return `not_evaluated(no_rule_version)` for it; the arithmetic for that date, 2026-11-18 and 2026-08-28, is still checked on the pure limit function.) |
 | UT-04 | ICBC claim with 25, 26, and 22 treatments plus a next appointment; then policy maximum 35 | Clear; flag; warning; clear |
 | UT-05 | ICBC visit on 2026-08-25, crash 2026-06-01, no end date; then crash date and end date both null | Flag (period ended 2026-08-24); `not_evaluated(missing_dates)` **and** ICBC-01 still returns its own result |
 | UT-06 | Second Initial Visit on a claim; two sessions one day | ICBC-04 flag; ICBC-05 flag |

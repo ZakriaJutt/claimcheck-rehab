@@ -58,4 +58,4 @@ What can a BC clinic recover **beyond Jane's existing rejection workflow**? Keep
 8. IT-08: marked submitted, export disagrees, item reopens.
 9. IT-11 and IT-12: deletion, then restore with replay.
 
-Definitions: [execution-plan.md](execution-plan.md#planned-tests). All are `Not run` today.
+Definitions: [execution-plan.md](execution-plan.md#planned-tests). B1 run of 2026-11-11 ([verification-report-fixing.md](verification-report-fixing.md#b1-implementation-record-2026-11-11)): checks 1 to 8 ran and passed, except that E2E-09 ran only as an API-level counterpart (no UI); check 9 (IT-11, IT-12) is `Not run`.

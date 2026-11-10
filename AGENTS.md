@@ -2,7 +2,7 @@
 
 Canonical instructions for any agent or developer working in this repository. [CLAUDE.md](CLAUDE.md) adds product-specific guidance and defers to this file.
 
-**State of the repository:** ten planning documents. No application, script, migration, environment or test exists. Every command named anywhere is **proposed**; do not report one as run.
+**State of the repository (2026-11-11, branch `feat/b1-foundation`):** the ten planning documents plus the B1 build (foundation and deterministic core). The owner authorised implementation on 2026-11-11, before the Phase 0 stop-rule decision (T-0.4.3) had been taken; that departure is recorded in [verification-report-fixing.md](verification-report-fixing.md#b1-implementation-record-2026-11-11) and the decision text in Decision.md is unchanged. Implemented: `packages/core`, `packages/minimiser`, `apps/api`, `apps/worker`, migrations, tests. Not implemented: `apps/web`, sign-in and second factor, invitations, email, deletion, export, deployment. Commands marked "exists" in [Commands (B1)](#commands-b1) have been run; every other command named anywhere is still **proposed**.
 
 ## Reading order
 
@@ -48,6 +48,49 @@ State a fact once, in its home file; elsewhere cite the ID.
 - Physiotherapy, ICBC and WorkSafeBC only, until other payer documents are read and cited.
 - No AI function. No file storage. No cache. Adding any of these needs a new AD and a review of R-05, R-13, R-14 and R-16.
 - No build task before T-0.4.3 records "go".
+
+## Commands (B1)
+
+| Command | Status | What it does |
+|---|---|---|
+| `make venv` | exists | Python 3.12 virtual environment at `dev/.venv`; npm install in `packages/minimiser` |
+| `make dev` / `make stop` | exists | `scripts/dev.sh`: checks PostgreSQL, migrates `claimcheck_dev`, runs the rule fixtures and only then publishes rules, starts the API on 8107 and the worker, checks `/healthz`, `/readyz` and the worker heartbeat; names the first unhealthy service. No web app on 3107 yet; no Redis (AD-05) |
+| `make test` | exists | Unit (pytest), integration (pytest against real PostgreSQL `claimcheck_test`, schema dropped and re-migrated at session start), minimiser (Vitest) |
+| `make test-clean` | exists | `make test` then `scripts/check_migrations.py` on the test database |
+| `make lint`, `make typecheck` | exist | ruff and mypy (strict); eslint and tsc |
+| `make check-migrations` | exists | Single head, ORM parity, forced RLS policy on every `clinic_id` table, invalid indexes |
+| `scripts/publish_rules.py` | exists | Publishes export profile v1 and the rule catalogue; refuses without `--fixtures-passed` |
+| `make deploy`, `scripts/backfill_runner.py`, `scripts/seed_synthetic.py`, `scripts/restore_replay.py`, `scripts/phase0_links.sh`, `scripts/log_scan.py` | proposed | Not built in B1 |
+
+Local values: databases `claimcheck_dev` / `claimcheck_test`; application role `claimcheck_app` (NOSUPERUSER, NOBYPASSRLS); API port 8107; frontend port 3107 (reserved); Redis database 6 (reserved, unused). Credentials live only in the git-ignored `.env.local`.
+
+## Utilities index (search here before writing a helper, R-03)
+
+| Need | Module (`packages/core/claimcheck_core`) |
+|---|---|
+| Settings, fail-fast on a missing variable | `settings.py` (`get_settings`, `load_settings`) |
+| JSON logging, correlation ID, withheld keys | `logging.py` (`configure`, `get_logger`, `log_event`, `set_correlation_id`) |
+| Calendar days in America/Vancouver | `dates.py` (`local_today`, `local_date_of`, `add_days`, `days_since`, `in_range`) |
+| Money as `Decimal` to the cent | `money.py` (`cad`, `total`, `ZERO`) |
+| Tenant transaction (`app.clinic_id`) | `tenancy.py` (`tenant_session`, `system_session`) — the only place that sets it |
+| Database engine | `db.py` (`get_engine`, `make_engine`) |
+| ORM models, list of clinic tables | `models.py` (`CLINIC_OWNED_TABLES`) |
+| Job queue: enqueue, claim with lease, guarded completion, lease sweep | `jobs.py` |
+| Audit events (counts and codes only) | `audit.py` (`write_audit`) |
+| Operator alerts behind an interface | `alerts.py` (`Alerter`, `AuditAlerter`) |
+| Import payload contract (16 fields + 2 ordinals) | `intake/contract.py` |
+| Identifier guard checks (i)–(iv) | `intake/guard.py` (`check_rows`) |
+| Batches: create, stage, finalize | `imports.py` |
+| Daily stored-row scan | `identifier_scan.py` |
+| Rule catalogue with effective dates and citations | `rules/catalogue.py` |
+| Scope check and engine | `rules/engine.py` (`evaluate`, `scope_of`) |
+| ICBC and WorkSafeBC rule functions, deadline arithmetic | `rules/payer_rules.py` (`submission_limit`, `wsbc_correction_limit`) |
+| Item lifecycle (write-once near-limit date, class change, confirmation) | `items.py` (`next_item`) |
+| Evaluation job, M-09 escapes, freshness | `evaluation.py` |
+| Staff outcomes with `If-Match` and idempotency | `outcomes.py` |
+| Band and cohort conversions; "nothing needs action" sentence | `measure.py` |
+| Export profile v1 (placeholder headers `[A]`) | `profiles/jane_v1.json`, `seed.py` |
+| Browser minimiser | `packages/minimiser/src` (`minimise`, `claimToken`, `contentHash`, `rowRequests`) |
 
 ## Architecture conventions (proposed)
 
