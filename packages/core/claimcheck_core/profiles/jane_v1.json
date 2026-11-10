@@ -1,0 +1,45 @@
+{
+  "_status": "[A] Placeholder headers. Jane publishes no column list (SRC-08, SRC-09); the real headers are captured from header-only files in T-0.1.2 and replace these before any clinic file is read.",
+  "sales": {
+    "version": 1,
+    "columns": {
+      "Invoice #": "invoice_ref",
+      "Purchase Date": "date_of_service",
+      "Payer": "payer",
+      "Billing Code": "billing_code",
+      "Amount to Insurer": "amount_invoiced",
+      "Insurer Payment": "amount_paid",
+      "Claim State": "submission_state",
+      "State Changed": "state_date",
+      "Staff Member": "practitioner",
+      "Claim #": "claim_number",
+      "Location": "location"
+    },
+    "required": ["Invoice #", "Purchase Date", "Payer", "Billing Code", "Amount to Insurer", "Claim State", "Staff Member", "Location"]
+  },
+  "policies": {
+    "version": 1,
+    "columns": {
+      "Claim #": "claim_number",
+      "Payer": "payer",
+      "Status": "policy_status",
+      "End Date": "end_date",
+      "Number of Treatments": "treatments_count",
+      "Policy Maximum": "policy_max",
+      "Next Appointment": "next_appointment_date",
+      "Date of Accident/Injury": "date_of_event",
+      "Location": "location"
+    },
+    "required": ["Claim #", "Payer"]
+  },
+  "payer_map": {"ICBC": "ICBC", "WorkSafeBC": "WSBC"},
+  "state_map": {"Unsubmitted": "unsubmitted", "Submitted": "submitted", "Rejected": "rejected", "Partially Paid": "partly_paid", "Paid": "paid"},
+  "policy_status_map": {"Active": "open", "Closed": "closed"},
+  "billing_codes": {
+    "PT-ICBC-IA": "ICBC-IV", "PT-ICBC-TX": "ICBC-ST", "PT-ICBC-EXT": "ICBC-SE",
+    "PT-ICBC-HT15": "ICBC-HT15", "PT-ICBC-HT30": "ICBC-HT30", "PT-ICBC-HT45": "ICBC-HT45",
+    "19100": "19100", "19101": "19101", "19102": "19102", "19103": "19103", "19303": "19303",
+    "19105": "19105", "19204": "19204", "19106": "19106", "19107": "19107", "19108": "19108",
+    "19109": "19109", "19171": "19171", "19193": "19193", "19313": "19313"
+  }
+}
