@@ -1,0 +1,20 @@
+{
+  "name": "@claimcheck/minimiser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Runs in the clinic's browser: matches Jane export headers, keeps 16 fields, tokenises the claim number, drops everything else (AD-01, MH-01).",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src test",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.17.0",
+    "@types/node": "22.10.2",
+    "eslint": "9.17.0",
+    "typescript": "5.7.2",
+    "typescript-eslint": "8.18.1",
+    "vitest": "2.1.8"
+  }
+}
