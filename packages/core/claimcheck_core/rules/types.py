@@ -10,13 +10,14 @@ from typing import Any, Literal
 
 Outcome = Literal["flag", "clear", "not_evaluated"]
 MoneyClass = Literal["permanent_certain", "permanent_discretionary", "delayed_cash", "admin_time", "warning"]
-CheckStatus = Literal["in_scope", "could_not_check", "no_rules_applied"]
+CheckStatus = Literal["in_scope", "rules_not_evaluated", "could_not_check", "no_rules_applied"]
 PortalStatus = Literal["not_received", "verified"] | None
 
 ICBC = "ICBC"
 WSBC = "WSBC"
 OTHER = "OTHER"
 UNMAPPED = "UNMAPPED"
+UNKNOWN_PAYER = "UNKNOWN"
 
 # Canonical ICBC service codes produced by the export profile's billing-code map (T-1.1.2 `[A]`:
 # Jane billing codes are clinic-defined; the profile maps each one to an ICBC service type).
@@ -41,8 +42,10 @@ R_MISSING_TREATMENT_COUNT = "missing_treatment_count"
 R_MISSING_DATE_OF_EVENT = "missing_date_of_event"
 R_MISSING_POLICY_STATUS = "missing_policy_status_and_next_appointment"
 R_JANE_SUBMITTED_UNVERIFIED = "jane_submitted_unverified"
+R_ICBC_REJECTED_NO_RULE = "icbc_rejected_no_rule"
+R_UNKNOWN_PAYER = "unknown_payer"
 
-SCOPE_REASONS = (R_UNKNOWN_STATE, R_NO_RULE_VERSION, R_UNMAPPED_CODE)
+SCOPE_REASONS = (R_UNKNOWN_PAYER, R_UNKNOWN_STATE, R_NO_RULE_VERSION, R_UNMAPPED_CODE)
 
 
 @dataclass(frozen=True)
@@ -70,7 +73,9 @@ class VisitIn:
     amount_paid: Decimal = Decimal("0.00")
     line_no: int = 1
     state_date: date | None = None
-    first_rejected_on: date | None = None
+    # B1-003: a date before which the product KNOWS no rejection had happened (the export date of the
+    # last snapshot in the initial run of "unsubmitted" observations). Never a guessed rejection date.
+    rejected_not_before: date | None = None
     claim_id: uuid.UUID | None = None
     # Staff outcome on the ICBC-07 item: ICBC's portal does not have it / it was verified there.
     portal_status: PortalStatus = None
@@ -123,7 +128,7 @@ class Evaluation:
     scopes: dict[uuid.UUID, Scope] = field(default_factory=dict)
 
     def counts(self) -> dict[str, int]:
-        out = {"in_scope": 0, "could_not_check": 0, "no_rules_applied": 0}
+        out = {"in_scope": 0, "rules_not_evaluated": 0, "could_not_check": 0, "no_rules_applied": 0}
         for s in self.scopes.values():
             out[s.status] += 1
         return out

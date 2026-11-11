@@ -27,6 +27,7 @@ from claimcheck_core.models import (
     ItemEvent,
     RuleVersion,
     Visit,
+    VisitSnapshot,
 )
 from claimcheck_core.rules.catalogue import rule_set_hash
 from claimcheck_core.rules.engine import evaluate
@@ -76,12 +77,30 @@ def _portal_and_outcomes(s: Session) -> tuple[dict[uuid.UUID, str | None], dict[
     return portal, last_outcome
 
 
-def _visit_in(v: Visit, portal: str | None) -> VisitIn:
+def rejection_lower_bounds(s: Session) -> dict[uuid.UUID, date]:
+    """B1-003: per visit, the export date of the last snapshot in the initial run of 'unsubmitted'
+    observations. Before that date the invoice had never been submitted, so it had never been rejected.
+    A visit first seen in any other state has no bound (WSBC-02 then uses service + 180)."""
+    out: dict[uuid.UUID, date] = {}
+    broken: set[uuid.UUID] = set()
+    q = select(VisitSnapshot.visit_id, VisitSnapshot.export_date, VisitSnapshot.submission_state).order_by(
+        VisitSnapshot.visit_id, VisitSnapshot.export_date, VisitSnapshot.created_at)
+    for vid, export_date, state in s.execute(q):
+        if vid in broken:
+            continue
+        if state == "unsubmitted":
+            out[vid] = export_date
+        else:
+            broken.add(vid)
+    return out
+
+
+def _visit_in(v: Visit, portal: str | None, not_before: date | None = None) -> VisitIn:
     return VisitIn(id=v.id, invoice_ref=v.invoice_ref, payer=v.payer, discipline=v.discipline,
                    date_of_service=v.date_of_service, billing_code=v.billing_code,
                    amount_invoiced=v.amount_invoiced, amount_paid=v.amount_paid,
                    submission_state=v.submission_state, line_no=v.line_no, state_date=v.state_date,
-                   first_rejected_on=v.first_rejected_on, claim_id=v.claim_id,
+                   rejected_not_before=not_before, claim_id=v.claim_id,
                    portal_status=portal)  # type: ignore[arg-type]
 
 
@@ -113,7 +132,7 @@ def find_escapes(
         v = visits[f.target_id]
         if v.first_seen_export_date > add_days(r.limit_date, -ESCAPE_NOTICE_DAYS):
             continue  # not present early enough to have been caught
-        if status_before.get(v.id) == "could_not_check":
+        if status_before.get(v.id) in ("could_not_check", "rules_not_evaluated"):
             continue  # it was listed as not checked
         covered = any(
             (st := items_before.get(("visit", v.id, rule))) is not None and st.first_flagged_on <= r.limit_date
@@ -141,7 +160,8 @@ def evaluate_clinic(
         visits = {v.id: v for v in s.scalars(select(Visit))}
         claims = list(s.scalars(select(Claim)))
         portal, last_outcome = _portal_and_outcomes(s)
-        vin = [_visit_in(v, portal.get(v.id)) for v in visits.values()]
+        bounds = rejection_lower_bounds(s)
+        vin = [_visit_in(v, portal.get(v.id), bounds.get(v.id)) for v in visits.values()]
         ev = evaluate(vin, [_claim_in(c) for c in claims], versions, on_date)
 
         items: dict[tuple[str, uuid.UUID, str], Item] = {}
@@ -156,7 +176,7 @@ def evaluate_clinic(
         _persist_findings(s, clinic_id, run_id, on_date, ev)
         for vid, scope in ev.scopes.items():
             v = visits[vid]
-            reason = scope.reasons[0] if scope.reasons else None
+            reason = ",".join(scope.reasons) if scope.reasons else None
             if (v.check_status, v.check_reason) != (scope.status, reason):
                 v.check_status, v.check_reason = scope.status, reason
 
@@ -187,6 +207,7 @@ def evaluate_clinic(
         ne = sum(1 for f in ev.findings if f.result.outcome == "not_evaluated")
         counts = ev.counts()
         checked_population = counts["in_scope"] + counts["could_not_check"]
+        checked_population += counts["rules_not_evaluated"]
         if checked_population and counts["could_not_check"] / checked_population > COULD_NOT_CHECK_ALERT_SHARE:
             alerter.alert(s, "could_not_check_share", clinic_id, could_not_check=counts["could_not_check"],
                           in_scope=counts["in_scope"])

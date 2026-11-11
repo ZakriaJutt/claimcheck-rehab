@@ -15,6 +15,7 @@ from claimcheck_core.money import ZERO, cad
 from claimcheck_core.rules.types import (
     ICBC_INITIAL,
     ICBC_SESSION_CODES,
+    R_ICBC_REJECTED_NO_RULE,
     R_JANE_SUBMITTED_UNVERIFIED,
     R_MISSING_DATE_OF_EVENT,
     R_MISSING_DATES,
@@ -86,13 +87,18 @@ def submission_limit(date_of_service: date, limit_days: int) -> tuple[date, date
 
 
 def wsbc_correction_limit(
-    date_of_service: date, first_rejected_on: date | None, service_days: int = 180, rejection_days: int = 90
+    date_of_service: date, rejected_not_before: date | None, service_days: int = 180, rejection_days: int = 90
 ) -> date:
-    """PR-08: later of service + 180 and first rejection + 90. Unknown first rejection date gives
-    service + 180, the earliest value the rule allows (never a guessed later date)."""
+    """PR-08: later of service + 180 and first rejection + 90 (B1-003).
+
+    The true first rejection date is never known for certain from weekly exports (a rejection can
+    predate the first export, and Jane's state date moves on re-rejection). So the limit returned is the
+    EARLIEST POSSIBLE limit: `rejected_not_before` is a date on which the product saw the invoice still
+    unsubmitted, so the first rejection came after it and first rejection + 90 is at least this value.
+    Without such a date the limit is service + 180. The true limit can only be later, never earlier."""
     limit = add_days(date_of_service, service_days)
-    if first_rejected_on is not None:
-        limit = max(limit, add_days(first_rejected_on, rejection_days))
+    if rejected_not_before is not None:
+        limit = max(limit, add_days(rejected_not_before, rejection_days))
     return limit
 
 
@@ -104,6 +110,9 @@ def icbc_01(v: VisitIn, ver: RuleVersionIn, ctx: Context) -> Result:
     if v.submission_state == "unknown":
         return _ne(code, ver, R_UNKNOWN_STATE)
     limit, submit_by = submission_limit(v.date_of_service, p["limit_days"])
+    if v.submission_state == "rejected" and v.portal_status != "not_received":
+        # No ICBC correction rule has been read (B1-004): never clear, never guessed.
+        return _ne(code, ver, R_ICBC_REJECTED_NO_RULE, limit_date=limit, submit_by=submit_by)
     if v.portal_status == "not_received" or v.submission_state == "unsubmitted":
         pass  # unsubmitted (or ICBC's portal does not have it): the deadline applies
     elif (v.submission_state == "submitted" and v.amount_paid == ZERO and v.portal_status != "verified"):
@@ -201,6 +210,11 @@ def icbc_07(v: VisitIn, ver: RuleVersionIn, ctx: Context) -> Result:
     limit, submit_by = submission_limit(v.date_of_service, p["limit_days"])
     if v.portal_status == "not_received":
         return _clear(code, ver)  # treated as unsubmitted: ICBC-01 applies
+    if v.submission_state == "rejected":
+        return _ne(code, ver, R_ICBC_REJECTED_NO_RULE, limit_date=limit, submit_by=submit_by)
+    if v.submission_state == "partly_paid" and outstanding(v) > ZERO:
+        # B1-004: a partial payment proves ICBC has the invoice; the balance is still owed.
+        return _flag(code, ver, "partly_paid_balance", "delayed_cash", outstanding(v), limit, submit_by)
     if v.submission_state != "submitted" or v.amount_paid > ZERO:
         return _clear(code, ver)
     if days_since(v.date_of_service, ctx.on_date) < p["flag_after_days"]:
@@ -261,14 +275,14 @@ def wsbc_02(v: VisitIn, ver: RuleVersionIn, ctx: Context) -> Result:
         return _ne(code, ver, R_UNKNOWN_STATE)
     if v.submission_state != "rejected":
         return _clear(code, ver)
-    limit = wsbc_correction_limit(v.date_of_service, v.first_rejected_on,
+    limit = wsbc_correction_limit(v.date_of_service, v.rejected_not_before,
                                   p["service_limit_days"], p["rejection_limit_days"])
     submit_by = add_days(limit, -1)
     if ctx.on_date > limit:
         return _flag(code, ver, "past_correction_limit", "permanent_certain", outstanding(v),
                      limit, submit_by, near_limit=True)
     near = days_since(ctx.on_date, limit) <= p["near_limit_days"]
-    return _flag(code, ver, "rejected_not_corrected", "delayed_cash", outstanding(v), limit, submit_by,
+    return _flag(code, ver, "rejected_earliest_limit", "delayed_cash", outstanding(v), limit, submit_by,
                  near_limit=near)
 
 
@@ -329,6 +343,9 @@ def wsbc_10(v: VisitIn, ver: RuleVersionIn, ctx: Context) -> Result:
     code = "WSBC-10"
     if v.submission_state == "unknown":
         return _ne(code, ver, R_UNKNOWN_STATE)
+    if v.submission_state == "partly_paid" and outstanding(v) > ZERO:
+        # B1-004: WorkSafeBC paid part of the invoice; the balance is delayed cash until paid or adjusted.
+        return _flag(code, ver, "partly_paid_balance", "delayed_cash", outstanding(v))
     if v.submission_state == "submitted" and v.amount_paid == ZERO:
         if days_since(v.state_date or v.date_of_service, ctx.on_date) >= ver.params["unpaid_days"]:
             return _flag(code, ver, "chase_payment", "delayed_cash", outstanding(v))

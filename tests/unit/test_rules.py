@@ -50,19 +50,19 @@ def test_ut03_wsbc_correction_window_arithmetic_as_catalogued() -> None:
     assert wsbc_correction_limit(D("2026-03-01"), D("2026-08-20")) == D("2026-11-18")
     assert wsbc_correction_limit(D("2026-03-01"), None) == D("2026-08-28")
     old = visit(payer="WSBC", billing_code="19102", amount_invoiced="95.00", date_of_service="2026-03-01",
-                submission_state="rejected", first_rejected_on=D("2026-08-20"))
+                submission_state="rejected", rejected_not_before=D("2026-08-20"))
     r = result(run([old], on="2026-09-01"), old.id, "WSBC-02")
     assert (r.outcome, r.reason) == ("not_evaluated", "no_rule_version")
 
 
 def test_ut03_wsbc_correction_window_inside_loaded_versions() -> None:
     known = visit(payer="WSBC", billing_code="19102", amount_invoiced="95.00", date_of_service="2026-05-01",
-                  submission_state="rejected", first_rejected_on=D("2026-08-20"))
+                  submission_state="rejected", rejected_not_before=D("2026-08-20"))
     r = result(run([known], on="2026-09-01"), known.id, "WSBC-02")
     assert (r.outcome, r.limit_date, r.money_class) == ("flag", D("2026-11-18"), "delayed_cash")
     assert not r.near_limit
     unknown = visit(payer="WSBC", billing_code="19102", amount_invoiced="95.00", date_of_service="2026-05-01",
-                    submission_state="rejected", first_rejected_on=None)
+                    submission_state="rejected", rejected_not_before=None)
     r = result(run([unknown], on="2026-09-01"), unknown.id, "WSBC-02")
     assert r.limit_date == D("2026-10-28")  # service + 180, the earliest value the rule allows
     assert result(run([unknown], on="2026-10-14"), unknown.id, "WSBC-02").near_limit  # 14 days left
@@ -203,7 +203,7 @@ def test_ut16_could_not_check_and_no_rules_applied_never_clear() -> None:
     assert "clear" not in outcomes(ev, c.id).values()
     assert ev.scopes[kinesiology.id].status == "no_rules_applied"
     assert outcomes(ev, kinesiology.id) == {}
-    assert ev.counts() == {"in_scope": 0, "could_not_check": 3, "no_rules_applied": 1}
+    assert ev.counts() == {"in_scope": 0, "rules_not_evaluated": 0, "could_not_check": 3, "no_rules_applied": 1}
 
 
 def test_ut16_wsbc_code_outside_pr11_is_could_not_check() -> None:

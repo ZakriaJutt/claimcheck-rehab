@@ -183,7 +183,7 @@ class Claim(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     __table_args__ = (
-        CheckConstraint("payer IN ('ICBC','WSBC','OTHER')", name="claim_payer_check"),
+        CheckConstraint("payer IN ('ICBC','WSBC','OTHER','UNKNOWN')", name="claim_payer_check"),
         CheckConstraint("claim_token ~ '^[0-9a-f]{32}$'", name="claim_token_format_check"),
         UniqueConstraint("clinic_id", "claim_token", "payer", name="claim_clinic_id_claim_token_payer_key"),
     )
@@ -205,7 +205,9 @@ class Visit(Base):
     amount_paid: Mapped[Decimal] = mapped_column(MONEY, nullable=False, server_default=text("0"))
     submission_state: Mapped[str] = mapped_column(Text, nullable=False)
     state_date: Mapped[date | None] = mapped_column(Date)
-    first_rejected_on: Mapped[date | None] = mapped_column(Date)
+    first_rejected_on: Mapped[date | None] = mapped_column(Date, comment=(
+        "Deprecated in fix round 1 (B1-003): not written or read; WSBC-02 derives an earliest-possible "
+        "bound from visit_snapshot. Removed by a later contract migration."))
     first_seen_batch_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("import_batch.id"), nullable=False
     )
@@ -217,7 +219,7 @@ class Visit(Base):
     check_status: Mapped[str | None] = mapped_column(Text)
     check_reason: Mapped[str | None] = mapped_column(Text)
     __table_args__ = (
-        CheckConstraint("payer IN ('ICBC','WSBC','OTHER')", name="visit_payer_check"),
+        CheckConstraint("payer IN ('ICBC','WSBC','OTHER','UNKNOWN')", name="visit_payer_check"),
         CheckConstraint("discipline IN ('physiotherapy','support','other')", name="visit_discipline_check"),
         CheckConstraint("amount_invoiced >= 0", name="visit_amount_invoiced_check"),
         CheckConstraint("amount_paid >= 0", name="visit_amount_paid_check"),
@@ -226,7 +228,8 @@ class Visit(Base):
             name="visit_submission_state_check",
         ),
         CheckConstraint(
-            "check_status IS NULL OR check_status IN ('in_scope','could_not_check','no_rules_applied')",
+            "check_status IS NULL OR check_status IN "
+            "('in_scope','rules_not_evaluated','could_not_check','no_rules_applied')",
             name="visit_check_status_check",
         ),
         UniqueConstraint("clinic_id", "invoice_ref", "line_no", name="visit_clinic_id_invoice_ref_line_no_key"),

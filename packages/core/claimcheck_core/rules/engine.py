@@ -24,8 +24,10 @@ from claimcheck_core.rules.types import (
     OTHER,
     R_NO_CLAIM_LINK,
     R_NO_RULE_VERSION,
+    R_UNKNOWN_PAYER,
     R_UNKNOWN_STATE,
     R_UNMAPPED_CODE,
+    UNKNOWN_PAYER,
     UNMAPPED,
     WSBC,
     ClaimIn,
@@ -53,12 +55,11 @@ class VersionIndex:
         return found[0] if found else None
 
 
-def _payer_rule_codes(payer: str) -> list[str]:
-    return sorted([*VISIT_RULES.get(payer, {}), *CLAIM_RULES.get(payer, {})])
-
-
 def scope_of(v: VisitIn, idx: VersionIndex) -> Scope:
-    if v.payer == OTHER or v.payer not in (ICBC, WSBC):
+    if v.payer == UNKNOWN_PAYER or v.payer not in (ICBC, WSBC, OTHER):
+        # Jane's payer wording was not recognised: it may be ICBC or WorkSafeBC (B1-007).
+        return Scope("could_not_check", (R_UNKNOWN_PAYER,))
+    if v.payer == OTHER:
         return Scope("no_rules_applied", ("other_payer",))
     if v.payer == ICBC and v.discipline != "physiotherapy":
         return Scope("no_rules_applied", ("discipline_out_of_scope",))
@@ -66,10 +67,13 @@ def scope_of(v: VisitIn, idx: VersionIndex) -> Scope:
     if v.submission_state == "unknown":
         reasons.append(R_UNKNOWN_STATE)
     if v.payer == ICBC:
-        if not any(idx.for_date(c, v.date_of_service) for c in _payer_rule_codes(ICBC)):
-            reasons.append(R_NO_RULE_VERSION)
+        fee_version = idx.for_date("ICBC-06", v.date_of_service)
         if v.billing_code == UNMAPPED or v.billing_code not in ICBC_KNOWN_CODES:
             reasons.append(R_UNMAPPED_CODE)
+        elif fee_version is None or v.billing_code not in fee_version.params["fees"]:
+            # e.g. Hand Therapy before 2026-09-27: the service did not exist in the loaded schedule
+            # for that date (Decision.md 4.1: "outside that period: could not check"; B1-002).
+            reasons.append(R_NO_RULE_VERSION)
     else:
         fee_version = idx.for_date("WSBC-08", v.date_of_service)
         if fee_version is None:
@@ -103,8 +107,8 @@ def evaluate(
     for v in ordered:
         scope = scope_of(v, idx)
         out.scopes[v.id] = scope
-        if scope.status == "no_rules_applied":
-            continue
+        if scope.status == "no_rules_applied" or v.payer not in VISIT_RULES:
+            continue  # counted; an unknown payer has no rule set to attempt
         for code, fn in sorted(VISIT_RULES[v.payer].items()):
             ver = idx.for_date(code, v.date_of_service)
             if ver is None:
@@ -122,6 +126,7 @@ def evaluate(
                 out.findings.append(Finding("visit", v.id, Result(code, "not_evaluated", reason,
                                                                   ver.id if ver else None)))
 
+    claim_findings: dict[uuid.UUID, list[Result]] = defaultdict(list)
     for claim_id in sorted(by_claim, key=str):
         claim = claim_map.get(claim_id)
         if claim is None or claim.payer not in CLAIM_RULES:
@@ -139,5 +144,21 @@ def evaluate(
                 res = Result(code, "not_evaluated", R_NO_RULE_VERSION)
             else:
                 res = cfn(claim, relevant, ver, ctx)
-            out.findings.append(Finding("claim", claim_id, _enforce_scope(res, claim_scope)))
+            res = _enforce_scope(res, claim_scope)
+            claim_findings[claim_id].append(res)
+            out.findings.append(Finding("claim", claim_id, res))
+
+    # B1-002: an in-scope visit with any applicable rule not evaluated (its own or its claim's) is
+    # never "checked": it gets its own status and a list row naming the rule and the reason.
+    visit_findings: dict[uuid.UUID, list[Result]] = defaultdict(list)
+    for f in out.findings:
+        if f.target == "visit":
+            visit_findings[f.target_id].append(f.result)
+    for v in ordered:
+        if out.scopes[v.id].status != "in_scope":
+            continue
+        results = visit_findings[v.id] + (claim_findings.get(v.claim_id, []) if v.claim_id else [])
+        missing = sorted({f"{r.rule_code}:{r.reason}" for r in results if r.outcome == "not_evaluated"})
+        if missing:
+            out.scopes[v.id] = Scope("rules_not_evaluated", tuple(missing))
     return out

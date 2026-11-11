@@ -14,7 +14,7 @@ from claimcheck_core.rules.engine import evaluate
 from claimcheck_core.rules.types import ClaimIn, VisitIn
 from tests.fixtures.factories import VERSIONS
 
-CODES = ["ICBC-IV", "ICBC-ST", "ICBC-HT30", "UNMAPPED", "19100", "19102", "19107", "19108", "19105", "19999"]
+CODES = ["ICBC-SE", "ICBC-IV", "ICBC-ST", "ICBC-HT30", "UNMAPPED", "19100", "19102", "19107", "19108", "19105", "19999"]
 STATES = ["unsubmitted", "submitted", "rejected", "partly_paid", "paid", "unknown"]
 
 
@@ -31,7 +31,7 @@ def rowsets(draw: st.DrawFn) -> tuple[list[VisitIn], list[ClaimIn], date]:
               for i in range(n_claims)]
     visits = []
     for i in range(draw(st.integers(1, 12))):
-        payer = draw(st.sampled_from(["ICBC", "WSBC", "OTHER"]))
+        payer = draw(st.sampled_from(["ICBC", "WSBC", "OTHER", "UNKNOWN"]))
         visits.append(VisitIn(
             id=uuid.UUID(int=1000 + i), invoice_ref=f"S-{i:04d}", payer=payer,
             discipline=draw(st.sampled_from(["physiotherapy", "support", "other"])),
@@ -79,6 +79,18 @@ def test_hcf1_no_clear_outside_scope(data: tuple[list[VisitIn], list[ClaimIn], d
         if f.result.outcome == "not_evaluated":
             assert f.result.reason
     assert sum(ev.counts().values()) == len(visits)  # every visit is counted somewhere
+    # B1-002: an in-scope ("checked") visit has no rule left unevaluated, on itself or on its claim
+    claim_of = {v.id: v.claim_id for v in visits}
+    for vid, scope in ev.scopes.items():
+        if scope.status == "in_scope":
+            mine = [f.result for f in ev.findings if f.target_id in (vid, claim_of[vid])]
+            assert all(r.outcome != "not_evaluated" for r in mine)
+    # B1-004: partly_paid and ICBC rejected never leave a visit with only "clear" results
+    for v in visits:
+        if (v.submission_state == "partly_paid" and v.amount_paid < v.amount_invoiced) or (
+                v.payer == "ICBC" and v.submission_state == "rejected"):
+            outs = {f.result.outcome for f in ev.findings if f.target_id == v.id}
+            assert outs != {"clear"}
     for v in visits:  # a Jane-submitted unpaid ICBC invoice never reads clear on ICBC-01
         if (v.payer == "ICBC" and v.submission_state == "submitted" and v.amount_paid == 0
                 and v.portal_status is None):
