@@ -62,7 +62,7 @@ State a fact once, in its home file; elsewhere cite the ID.
 | `scripts/publish_rules.py` | exists | Publishes export profile v1 and the rule catalogue; refuses without `--fixtures-passed`, and refuses when a stored version differs from the catalogue under the same number |
 | `make deploy`, `scripts/backfill_runner.py`, `scripts/seed_synthetic.py`, `scripts/restore_replay.py`, `scripts/phase0_links.sh`, `scripts/log_scan.py` | proposed | Not built in B1 |
 
-Local values: databases `claimcheck_dev` / `claimcheck_test`; application role `claimcheck_app` and worker role `claimcheck_worker` (both NOSUPERUSER, NOBYPASSRLS; only the worker role may run the job-queue functions); API port 8107; frontend port 3107 (reserved); Redis database 6 (reserved, unused). Credentials live only in the git-ignored `.env.local`.
+Local values: databases `claimcheck_dev` / `claimcheck_test`; application role `claimcheck_app` and worker role `claimcheck_worker` (both NOSUPERUSER, NOBYPASSRLS; only the worker role may run the job-queue functions); non-login function owners `claimcheck_queue_owner` and `claimcheck_session_owner` (created by migrations); API port 8107; frontend port 3107 (reserved); Redis database 6 (reserved, unused). Credentials live only in the git-ignored `.env.local`.
 
 ## Utilities index (search here before writing a helper, R-03)
 

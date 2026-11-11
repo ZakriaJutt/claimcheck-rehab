@@ -235,3 +235,26 @@ Documents changed in fix round 1: TRD.md (scope groups and row accounting, ICBC-
 | B1-008 (open part) | fixed after retest | Migration `202611111500_round2`: queue functions owned by `claimcheck_queue_owner` (NOLOGIN, NOSUPERUSER, NOBYPASSRLS), with policies on `job` and `clinic` for that role only; search_path `pg_catalog, public, pg_temp`; same locally and in production. `cc_session_principal` remains owned by the migration user (open, not in the ruling) | `test_b1_008_queue_functions_have_a_dedicated_non_superuser_owner`; all worker-role job tests pass through the new owner |
 
 Commands after these edits, from a freshly dropped and re-migrated `claimcheck_test` (three revisions, single head): `make test-clean` gives unit 64 passed, integration 46 passed, minimiser 13 passed, migration check pass; `make lint` clean (ruff, eslint); `make typecheck` clean (mypy strict, tsc). The reviewer's notes are not changed: `rejected_not_before` still uses the first `unsubmitted` snapshot's export date, and the summary still reads only the latest completed batch.
+
+### Round 3 retest verdicts (independent reviewer, copied unchanged from `claimcheck-rehab-b1-verdicts.json`)
+
+| ID | Reviewer verdict (round 3) |
+|---|---|
+| B1-001 | Closed |
+| B1-002 | Closed |
+| B1-003 | Closed |
+| B1-004 | Closed |
+| B1-005 | Closed |
+| B1-006 | Closed |
+| B1-007 | Closed |
+| B1-008 | Closed |
+| B1-009 | Closed |
+| B1-010 | Closed |
+
+### Edit after the round-3 retest (fixed after round-3 retest, lead-checked)
+
+| Item | Status | Fix | Tests |
+|---|---|---|---|
+| `cc_session_principal` owner (round-3 residual, not a finding; hardening) | fixed after round-3 retest, lead-checked | Migration `202611111800_session_owner`: the session lookup is owned by `claimcheck_session_owner` (NOLOGIN, NOSUPERUSER, NOBYPASSRLS, NOINHERIT, no memberships), which holds only SELECT, UPDATE on `session` and SELECT on `app_user` through the policy `app_user_session_owner` granted to that role alone; search_path `pg_catalog, public, pg_temp`; EXECUTE held by the owner and `claimcheck_app` only (revoked from PUBLIC and `claimcheck_worker`). Same locally and in production | `tests/integration/test_session_owner.py` (3): owner attributes, pinned search_path, EXECUTE holders, exact table grants; the app role still resolves its session, the worker is refused, `SET ROLE`, direct `SELECT FROM session` and `ALTER FUNCTION` are refused; a planted temp `session` table is not read |
+
+Commands after this edit, from a freshly dropped and re-migrated `claimcheck_test` (four revisions, single head): `make test-clean` gives unit 64 passed, integration 49 passed, minimiser 13 passed, migration check pass; `make lint` clean (ruff, eslint); `make typecheck` clean (mypy strict on 37 files, tsc).
