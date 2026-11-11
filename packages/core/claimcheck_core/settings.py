@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     smtp_username: str | None = None
     smtp_password: str | None = None
     smtp_timeout_seconds: float = 10.0
+    # C2 (CASL s. 6(2), CRTC Regulations SOR/2012-36 s. 2(1)): every message names the sender and gives a
+    # mailing address and an email or web address valid for 60 days. Required in staging and production.
+    mail_sender_name: str = "ClaimCheck Rehab"
+    mail_postal_address: str = ""
+    mail_contact: str = ""
 
     # B2 object store (AD-11): S3 API (MinIO locally). Credentials optional: production uses the instance role.
     s3_bucket: str = Field(min_length=3)
@@ -106,6 +111,8 @@ class Settings(BaseSettings):
                 raise ValueError("cookie_secure must be true")
             if self.s3_server_side_encryption is None:
                 raise ValueError("s3_server_side_encryption is required")
+            if not self.mail_postal_address.strip() or not self.mail_contact.strip():
+                raise ValueError("mail_postal_address and mail_contact are required (CASL)")
         return self
 
 
@@ -117,8 +124,8 @@ def load_settings() -> Settings:
     try:
         return Settings()
     except ValidationError as exc:
-        names = sorted({str(err["loc"][0]).upper() if err.get("loc") else "PUBLIC_BASE_URL, COOKIE_SECURE or "
-                        "S3_SERVER_SIDE_ENCRYPTION" for err in exc.errors()})
+        names = sorted({str(err["loc"][0]).upper() if err.get("loc") else "PUBLIC_BASE_URL, COOKIE_SECURE, "
+                        "S3_SERVER_SIDE_ENCRYPTION, MAIL_POSTAL_ADDRESS or MAIL_CONTACT" for err in exc.errors()})
         msg = "configuration error: missing or invalid setting(s): " + ", ".join(names)
         print(msg, file=sys.stderr)
         raise SettingsError(2) from None

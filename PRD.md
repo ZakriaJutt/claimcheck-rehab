@@ -107,6 +107,7 @@ Priority: P0 = the pilot cannot run without it; P1 = needed before a second payi
 | Dependency | The clinic records ICBC payments and submission states in Jane promptly; where it does not, the product reports what Jane says. |
 | Constraint | PIPA: use only for the clinic's billing purpose; reasonable security; destroy when no longer needed `[S: SRC-25]` ss. 18(2), 34, 35(2). |
 | Constraint | Storage and processing in Canada `[C]`. |
+| Constraint | C2 (2026-11-11): ICBC's Direct Billing Terms Schedule B and WorkSafeBC's agreement s. 9.4 and Schedule D govern the clinic's claim rows; real rows reach the server only with each payer's written approval; proposed default Model L (only a clinic-level summary leaves), OD-5 ([compliance/self-check.md](compliance/self-check.md) sections 6, 7, 9). |
 | Constraint | One founder; Phase 0 cash cap CAD 5,500 ([Decision.md section 9.3](Decision.md#93-costs-kept-apart)). |
 | Constraint | No build before the stop rule is read ([Decision.md section 11.3](Decision.md#113-proposed-revision-p--a-change-to-the-chats-rule-not-a-restatement)). |
 

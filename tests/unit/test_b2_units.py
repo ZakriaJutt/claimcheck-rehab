@@ -105,7 +105,8 @@ def test_production_settings_refuse_local_links_and_plain_storage() -> None:
            "TOTP_ENCRYPTION_KEY": "dGVzdC1vbmx5LXRvdHAta2V5LTMyLWJ5dGVzLWxvbmc="}
     r = _run("from claimcheck_core.settings import load_settings; load_settings()", env)
     assert r.returncode == 2 and "PUBLIC_BASE_URL" in r.stderr
-    ok = {**env, "PUBLIC_BASE_URL": "https://app.claimcheck.example", "S3_SERVER_SIDE_ENCRYPTION": "aws:kms"}
+    ok = {**env, "PUBLIC_BASE_URL": "https://app.claimcheck.example", "S3_SERVER_SIDE_ENCRYPTION": "aws:kms",
+          "MAIL_POSTAL_ADDRESS": "100 Example St, Vancouver BC", "MAIL_CONTACT": "privacy@claimcheck.example"}
     r = _run("from claimcheck_core.settings import load_settings; load_settings(); print('ok')", ok)
     assert r.returncode == 0, r.stderr
     r = _run("from claimcheck_core.settings import load_settings; load_settings()",

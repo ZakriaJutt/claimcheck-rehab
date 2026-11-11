@@ -10,7 +10,7 @@ Turn the same two Jane exports (Sales invoice lines over 365 days and Insurance 
 
 | Constraint | Source |
 |---|---|
-| Clinic data stored and processed in Canada | `[C]` |
+| Clinic data stored and processed in Canada | `[C]`; C2: also required by the WorkSafeBC agreement Schedule D s. 15, including email, backup and disaster-recovery servers ([compliance/self-check.md](compliance/self-check.md) section 8) |
 | Use only for the clinic's billing purpose; reasonable security; destroy when not needed | `[S: SRC-25]` ss. 18(2), 34, 35(2) |
 | No Jane API; input is Excel or CSV exported by staff | `[C]` `[S: SRC-11]` |
 | Dates, money, access and eligibility are deterministic code | SPEC; AD-04 |
@@ -136,7 +136,7 @@ Errors use one shape: `{code, message, correlation_id, fields?}`.
 
 ### Configuration and secrets
 
-One typed settings module in `packages/core`, read from environment variables and validated at start; the API and worker fail to start on a missing or malformed value. Secrets (database URL, `TOTP_ENCRYPTION_KEY`, SMTP credentials for SES) live in AWS Systems Manager Parameter Store, ca-central-1. B2: session tokens are 256-bit random values stored as SHA-256, so no session pepper is used. Email goes through SMTP only (`SMTP_*`: Mailpit at 127.0.0.1:1025 locally, the SES SMTP interface later), the object store through the S3 API (`S3_*`: MinIO locally, S3 in production with the instance role); both are chosen by settings alone. In staging and production the settings refuse a non-HTTPS or local `PUBLIC_BASE_URL`, `COOKIE_SECURE=false` and a missing `S3_SERVER_SIDE_ENCRYPTION`. No secret is in the repository or in an image. `PUBLIC_BASE_URL` is the only source for links in email (R-16).
+One typed settings module in `packages/core`, read from environment variables and validated at start; the API and worker fail to start on a missing or malformed value. Secrets (database URL, `TOTP_ENCRYPTION_KEY`, SMTP credentials for SES) live in AWS Systems Manager Parameter Store, ca-central-1. B2: session tokens are 256-bit random values stored as SHA-256, so no session pepper is used. Email goes through SMTP only (`SMTP_*`: Mailpit at 127.0.0.1:1025 locally, the SES SMTP interface later), the object store through the S3 API (`S3_*`: MinIO locally, S3 in production with the instance role); both are chosen by settings alone. In staging and production the settings refuse a non-HTTPS or local `PUBLIC_BASE_URL`, `COOKIE_SECURE=false`, a missing `S3_SERVER_SIDE_ENCRYPTION`, and (C2, CASL s. 6(2)) a missing `MAIL_POSTAL_ADDRESS` or `MAIL_CONTACT`; every email ends with `mail.sender_footer` (sender name, mailing address, contact; the invitation also with an unsubscribe line) ([compliance/self-check.md](compliance/self-check.md) section 1). No secret is in the repository or in an image. `PUBLIC_BASE_URL` is the only source for links in email (R-16).
 
 ### Jobs, retries, timeouts, idempotency
 

@@ -189,7 +189,7 @@ Two lines on one invoice with the same code and date are two visits (`line_no` 1
 | Database backups | As the data they contain | 35 days |
 | Phase 0 files | Same as `visit`; claim codes are sequential, table held by the clinic | Transfer bucket (ca-central-1): 7 days by lifecycle rule. Encrypted laptop: deleted 30 days after the report or at pilot end + 30 days. Encrypted drive: wiped after each copy. Logged in the hand-kept deletion register (T-0.4.4) |
 
-PIPA s. 35(1) (keep for a year information used to make a decision that directly affects the individual) is judged not to apply `[A]`: the product makes no decision about a patient. To be confirmed in T-0.1.3.
+PIPA s. 35(1) (keep for a year information used to make a decision that directly affects the individual) is judged not to apply `[A]`: the product makes no decision about a patient. To be confirmed in T-0.1.3. **C2 (2026-11-11): answered by [compliance/self-check.md](compliance/self-check.md) section 3 (does not apply to ClaimCheck's copy; the clinic's own records follow the College's 16-year rule), owner sign-off recorded.**
 
 ## 10. Export, deletion, backup expiry and restore
 

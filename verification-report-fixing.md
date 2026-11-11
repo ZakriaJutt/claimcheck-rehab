@@ -103,7 +103,7 @@ Open after two fix rounds; none can be closed by editing documents.
 | O-2 | Exact Jane export headers; whether state dates, crash date, injury date and claim number are exported; the format of Jane invoice numbers (needed by the identifier guard) | Header-only files from a clinic | T-0.1.2 |
 | O-3 | Whether Jane shows a deadline clock in the live product | Live-account check | T-0.1.2 |
 | O-4 | Reachable pool not counted; 600 is an assumption | Counted list | T-0.1.4 |
-| O-5 | Legal reading of PIPA s. 18(2) and s. 35, ICBC terms, WorkSafeBC agreement, college standard | Counsel's note | T-0.1.3 |
+| O-5 | Legal reading of PIPA s. 18(2) and s. 35, ICBC terms, WorkSafeBC agreement, college standard — **C2 (2026-11-11): answered by [compliance/self-check.md](compliance/self-check.md) sections 2, 3, 5, 6, 7, owner sign-off recorded (no lawyer); the payers' written approvals for Model R remain open (OD-5)** | Counsel's note (C2: replaced by the self-check) | T-0.1.3 |
 | O-6 | TELUS eClaims page blocked; chiropractic and massage guides not read | Access; reading | T-1.1.1 |
 | O-7 | ASVS 14.3.3 not met by design (clinic key in browser storage) | Decision to accept or redesign | T-1.1.4 |
 | O-8 | Build estimate 356–574 hours against the chat's 120 | Portfolio owner's decision on scope | T-0.4.3 |
@@ -327,3 +327,24 @@ Correction round C1 under `_coordination/C1-GUIDE.md`, branch `feat/b2-local-aut
 | 7 | Three synthetic cases: timely and paid; late but paid (with its pre-payment snapshot); rejected but still correctable (with the snapshot past the earliest limit); each states which answer the export gives and which needs portal confirmation | `tests/fixtures/c1_cases.py`, `claimcheck_core/evidence.py`; execution-plan UT-22, IT-21 | `test_c1_cases_export_answers_and_portal_questions` (5 parametrised cases) | — |
 
 Commands, from a freshly dropped and re-migrated `claimcheck_test` (eight revisions, single head): before C1, `make test-clean` gave unit 79, integration 78, minimiser 13 passed; after C1, unit 93 passed, integration 81 passed (1 Starlette deprecation warning), minimiser 13 passed, migration check pass; `make lint` clean; `make typecheck` clean; `make migrate` and `make check-migrations` on `claimcheck_dev` pass; migration `202611120100` downgrade and upgrade on `claimcheck_test` exit 0. Not done: the minimiser does not yet drop fully paid lines older than 90 days before upload (OD-4); no UI exists for the new groups (B2 has no `apps/web`).
+
+## C2 compliance self-check 2026-11-11 (lead-checked, not legal advice)
+
+Round C2 under `_coordination/C2-GUIDE.md`, branch `feat/b2-local-auth`. Owner decision of 2026-11-11: no lawyer for now; the owner's own research of primary sources replaces the lawyer gates and the owner accepts the remaining risk. Written up in [compliance/self-check.md](compliance/self-check.md); sources SRC-34 to SRC-45 added to [Decision.md section 15](Decision.md#15-sources-and-assumptions) (SRC-25 re-opened), all opened 2026-11-11. Blocked: CRTC CASL FAQ (HTTP 403); ICBC Health Care Services Terms PDF (HTTP 404, superseded by the Direct Billing Terms, SRC-43).
+
+| # | Legal question | Answer (self-check section) | Residual risk |
+|---|---|---|---|
+| LQ-1 | CASL, emails to clinic owners and product emails | Only to addresses the clinic published or gave us; sender, mailing address, contact and unsubscribe in every message (1) | Low; medium with email-finder addresses (OD-7) |
+| LQ-2 | PIPA s. 18(2) authority, roles (clinic responsible, ClaimCheck its service provider) | Reasonable basis, not certain (2) | Model L low; Model R medium |
+| LQ-3 | PIPA s. 34, s. 35, breach notification | s. 35(1) does not apply to our copy; no PIPA breach duty, but the payer contracts require notice (3) | Model L low; Model R medium |
+| LQ-4 | Are minimised rows personal information? | Yes; clinic-level aggregates very likely not (4) | Rows certain PI; aggregates low |
+| LQ-5 | CHCPBC Ethics and Practice Standards | Disclose "only with consent, unless required by law" (5) | Model L low; Model R medium |
+| LQ-6 | ICBC Health Care Direct Billing Terms, Schedule B | Internet transmission of ICBC claim records needs ICBC approval or contemplation (6) | Model R without approval high; Model L low |
+| LQ-7 | WorkSafeBC Physiotherapy Services Agreement, s. 9.4, Schedule D | Written consent for third-party disclosure; Canada-only incl. email and backups; covers aggregated data (7) | Model R without consent high; Model L low to medium |
+| LQ-8 | Data residency | Canada only (ca-central-1); foreign-demand exposure handled by contract (8) | Low; medium for foreign demands |
+
+Gates changed (original text kept beside each, "answered by compliance/self-check.md section X, owner sign-off recorded"): execution-plan T-0.1.3, Counsel role, external dependency line, Phase 0 data procedure note, subtasks; Decision.md sections 6, 14 (row 4), 15, 16 (OD-5 Model L, OD-6 legal budget line, OD-7 email finder; owner decision recorded); schema.md section 9 (s. 35(1)); O-5 above. AGENTS.md (state, sources of truth, what-to-update), CLAUDE.md, PRD.md (constraint), TRD.md (Canada constraint, settings) updated to match.
+
+Software change (CASL s. 6(2), s. 11; SOR/2012-36 s. 2): `claimcheck_core.mail.sender_footer` appended to the invitation (with unsubscribe line) and reset emails; settings `MAIL_SENDER_NAME`, `MAIL_POSTAL_ADDRESS`, `MAIL_CONTACT` (`.env.example`), required in staging and production. Test UT-23, `tests/unit/test_c2_compliance.py` (4 tests); `test_b2_units.py` production-settings test given the two new values.
+
+Commands (lead-run, 2026-11-11): `make test-clean` — unit 97 passed (93 before + 4), integration 81 passed (1 Starlette deprecation warning), minimiser 13 passed, migration checks pass; `make lint` clean; `make typecheck` clean. Not done: no payer has been asked (self-check 10.5 letters are templates); Model L is not built (no workbook rule sheet, no offline page); the weekly email does not exist yet, so its footer is specified, not implemented; the CRTC FAQ, National DNCL rules and Jane's terms were not read.

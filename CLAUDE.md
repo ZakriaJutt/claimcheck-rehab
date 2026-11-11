@@ -25,6 +25,7 @@ What can a BC clinic recover **beyond Jane's existing rejection workflow**? Keep
 - Clinic rows are pseudonymised personal information of patients, held on behalf of the clinic under BC PIPA. Treat them as personal information.
 - Only the 16 fields in [schema.md](schema.md#2-minimum-authorized-pilot-data). Canada only. Use only for that clinic's list and audit.
 - The clinic key never reaches the server.
+- ICBC and WorkSafeBC contracts govern these rows too: no real row reaches our server without each payer's written approval ([compliance/self-check.md](compliance/self-check.md) sections 6, 7, 9.4). Every email carries the CASL sender footer (`mail.sender_footer`).
 
 ## Prohibited shortcuts
 

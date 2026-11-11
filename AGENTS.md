@@ -2,7 +2,7 @@
 
 Canonical instructions for any agent or developer working in this repository. [CLAUDE.md](CLAUDE.md) adds product-specific guidance and defers to this file.
 
-**State of the repository (2026-11-11, branch `feat/b2-local-auth`):** the ten planning documents, the B1 build (foundation and deterministic core) and B2 (sign-in with password and TOTP, recovery codes, invitations, password reset, sessions, anti-forgery, rate limits, email through SMTP to the local Mailpit, the minimised import payload in the local MinIO object store under AD-11). Correction round C1 (2026-11-11): money classes `past_deadline_discretionary` and `confirmed_unpaid` (migration `202611120100`), the free-audit look-back set, WorkSafeBC manual rules at version 2, one export definition and exact data wording; see [verification-report-fixing.md](verification-report-fixing.md#c1-corrections-2026-11-11-lead-checked-not-independently-reviewed). The owner authorised implementation on 2026-11-11, before the Phase 0 stop-rule decision (T-0.4.3) had been taken; that departure is recorded in [verification-report-fixing.md](verification-report-fixing.md#b1-implementation-record-2026-11-11) and the decision text in Decision.md is unchanged. Implemented: `packages/core`, `packages/minimiser`, `apps/api`, `apps/worker`, migrations, tests. Not implemented: `apps/web`, the weekly email, deletion and export (MH-11), lost-factor re-enrolment, password change while signed in, operator sign-in, deployment. Commands marked "exists" in [Commands (B1, B2)](#commands-b1-b2) have been run; every other command named anywhere is still **proposed**.
+**State of the repository (2026-11-11, branch `feat/b2-local-auth`):** the ten planning documents, the B1 build (foundation and deterministic core) and B2 (sign-in with password and TOTP, recovery codes, invitations, password reset, sessions, anti-forgery, rate limits, email through SMTP to the local Mailpit, the minimised import payload in the local MinIO object store under AD-11). Correction round C1 (2026-11-11): money classes `past_deadline_discretionary` and `confirmed_unpaid` (migration `202611120100`), the free-audit look-back set, WorkSafeBC manual rules at version 2, one export definition and exact data wording; see [verification-report-fixing.md](verification-report-fixing.md#c1-corrections-2026-11-11-lead-checked-not-independently-reviewed). The owner authorised implementation on 2026-11-11, before the Phase 0 stop-rule decision (T-0.4.3) had been taken; that departure is recorded in [verification-report-fixing.md](verification-report-fixing.md#b1-implementation-record-2026-11-11) and the decision text in Decision.md is unchanged. Implemented: `packages/core`, `packages/minimiser`, `apps/api`, `apps/worker`, migrations, tests. Not implemented: `apps/web`, the weekly email, deletion and export (MH-11), lost-factor re-enrolment, password change while signed in, operator sign-in, deployment. Compliance round C2 (2026-11-11): no lawyer is hired; [compliance/self-check.md](compliance/self-check.md) answers the legal questions (CASL, PIPA, College, ICBC and WorkSafeBC contracts, residency) from primary sources opened that day, not legal advice, owner sign-off recorded in Decision.md section 16; product emails carry the CASL sender footer (`mail.sender_footer`); the no-lawyer operating model (Model L, OD-5) is a proposal. Commands marked "exists" in [Commands (B1, B2)](#commands-b1-b2) have been run; every other command named anywhere is still **proposed**.
 
 ## Reading order
 
@@ -26,6 +26,7 @@ Canonical instructions for any agent or developer working in this repository. [C
 | Visual and copy decisions (DD-nn), accessibility map | design.md |
 | Tasks, estimates, tests | execution-plan.md |
 | Risks, traceability, findings, self-check | verification-report-fixing.md |
+| Legal questions, payer contract terms, templates (data agreement, notices, footer, deletion letter) | compliance/self-check.md (not legal advice) |
 
 State a fact once, in its home file; elsewhere cite the ID.
 
@@ -41,6 +42,7 @@ State a fact once, in its home file; elsewhere cite the ID.
 | A payer rule or fee | Decision 4.1 (PR row, source, date) → TRD rule table → fixtures (T-1.1.1) → S-13 log entry |
 | An operating assumption (price, rate, cost, pool) | Decision (inputs, then every derived figure, ramp tables, stop-rule probabilities) → PRD targets → re-run the arithmetic and record it in the SC log |
 | A risk disposition | verification register only |
+| A legal rule, payer contract term or outreach channel | compliance/self-check.md (rule, quote, source, date) → Decision section 15 (SRC row) and 16 (OD if it changes the plan) → the affected section (6 data, 12 outreach) → data agreement template → code and test only if software behaviour changes |
 
 ## Product boundaries
 

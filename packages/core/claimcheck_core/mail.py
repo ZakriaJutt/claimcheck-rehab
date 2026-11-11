@@ -3,6 +3,11 @@ provider later through the same interface, selected by settings alone.
 
 Messages carry links and counts only, never row data (AD-08). Links are built only from PUBLIC_BASE_URL
 (R-16). Tokens go in the URL fragment, so they are not sent to any server in a request line or Referer.
+
+C2 (compliance/self-check.md section 1): every message ends with the sender identification that CASL s. 6(2)
+and CRTC Regulations SOR/2012-36 s. 2(1) require (name, mailing address, email or web contact); a message that
+could be read as commercial (the invitation, and later the weekly email) also carries an unsubscribe line
+(CASL s. 11). The values come from settings and are required in staging and production.
 """
 
 from __future__ import annotations
@@ -65,18 +70,32 @@ def link(path: str, token: str) -> str:
     return f"{get_settings().public_base_url}{path}#token={token}"
 
 
+def sender_footer(unsubscribe: bool) -> str:
+    """CASL identification (and, for a possibly commercial message, the unsubscribe line). No row data."""
+    s = get_settings()
+    name = s.mail_sender_name.strip() or "ClaimCheck Rehab"
+    address = s.mail_postal_address.strip() or "[mailing address not set]"
+    contact = s.mail_contact.strip() or "[contact not set]"
+    text = f"\n--\nSent by {name}, {address}. Contact: {contact}.\n"
+    if unsubscribe:
+        text += (f"To stop receiving messages from {name}, write STOP to {contact}; it takes effect within "
+                 "10 business days.\n")
+    return text
+
+
 def invite_mail(to: str, token: str, hours: int) -> Mail:
     return Mail(to, "You are invited to ClaimCheck Rehab",
                 f"Your clinic has invited you to ClaimCheck Rehab.\n\nSet your password and authenticator app here "
                 f"(the link works once and expires in {hours} hours):\n{link('/invite', token)}\n\n"
-                "If you did not expect this, ignore this message.\n")
+                "If you did not expect this, ignore this message.\n" + sender_footer(unsubscribe=True))
 
 
 def reset_mail(to: str, token: str, minutes: int) -> Mail:
     return Mail(to, "Reset your ClaimCheck Rehab password",
                 f"Someone asked to reset the password for this address.\n\nChoose a new password here (the link "
                 f"works once and expires in {minutes} minutes):\n{link('/reset', token)}\n\nYou will still need "
-                "your authenticator code to sign in. If you did not ask, ignore this message.\n")
+                "your authenticator code to sign in. If you did not ask, ignore this message.\n"
+                + sender_footer(unsubscribe=False))
 
 
 def send_safely(mailer: Mailer, mail: Mail, kind: str) -> bool:
