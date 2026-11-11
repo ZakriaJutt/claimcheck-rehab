@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     rate_mfa_per_user: int = 5
     rate_reset_per_account: int = 3
     rate_public_per_ip: int = 30
+    # S08: proxies whose X-Forwarded-For is believed (comma-separated addresses or CIDR ranges). Empty: the
+    # client address is always the direct TCP peer. The server's own proxy-header trust must be off
+    # (uvicorn --no-proxy-headers; FORWARDED_ALLOW_IPS empty), so the peer reaching the app is the real one.
+    trusted_proxies: str = ""
 
     # B2 email: SMTP only (Mailpit locally, a real provider later by settings alone).
     smtp_host: str = "127.0.0.1"
@@ -68,6 +72,15 @@ class Settings(BaseSettings):
             raise ValueError("must be an absolute http(s) URL")
         return v.rstrip("/")
 
+
+    @field_validator("trusted_proxies")
+    @classmethod
+    def _networks(cls, v: str) -> str:
+        import ipaddress
+        for part in (p.strip() for p in v.split(",")):
+            if part:
+                ipaddress.ip_network(part, strict=False)  # ValueError names the setting
+        return v
 
     @field_validator("totp_encryption_key")
     @classmethod

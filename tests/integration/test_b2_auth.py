@@ -425,7 +425,7 @@ def test_b2_credential_tables_are_reachable_only_through_owned_functions(app_eng
             "has_function_privilege('claimcheck_worker', p.oid, 'EXECUTE'), "
             "has_function_privilege('claimcheck_app', p.oid, 'EXECUTE') "
             "FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner WHERE p.proname LIKE 'cc\\_auth\\_%'")).all()
-    assert len(rows) == 14
+    assert len(rows) == 16
     for name, owner, sup, bypass, login, secdef, config, worker_x, app_x in rows:
         assert (owner, sup, bypass, login, secdef, worker_x, app_x) == (
             "claimcheck_auth_owner", False, False, False, True, False, True), name
@@ -601,3 +601,52 @@ def test_b2_s01_regression_stale_or_planted_session_cookie_does_not_block_sign_i
     web.cookies.set("cc_csrf", h["X-CSRF-Token"])
     assert web.post("/api/v1/auth/sign-out", headers=h).status_code == 403
     assert web.post("/api/v1/auth/sign-out", headers={"X-CSRF-Token": r.json()["csrf"]}).status_code == 204
+
+
+def test_s08_rotating_forwarded_for_from_an_untrusted_peer_does_not_escape_the_address_limit(
+        app_engine: Engine) -> None:
+    from claimcheck_api.main import create_app
+    limit = get_settings().rate_signin_per_ip
+    with TestClient(create_app(), base_url="https://testserver", client=("198.51.100.9", 50000)) as c:
+        h = csrf(c)
+        codes = [c.post("/api/v1/auth/sign-in", json={"email": addr("n"), "password": "x-wrong-1"},
+                        headers={**h, "X-Forwarded-For": f"192.0.2.{i}"}).status_code for i in range(limit + 2)]
+    assert codes[:limit] == [401] * limit and codes[limit:] == [429, 429]
+
+
+def test_s08_behind_a_trusted_proxy_the_right_most_untrusted_hop_counts(app_engine: Engine,
+                                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    from claimcheck_api.main import create_app
+    monkeypatch.setattr(get_settings(), "trusted_proxies", "10.0.0.0/8")
+    limit = get_settings().rate_signin_per_ip
+    with TestClient(create_app(), base_url="https://testserver", client=("10.0.0.5", 50000)) as c:
+        h = csrf(c)
+        # the client forges left-hand hops; the proxy appends the real address on the right
+        codes = [c.post("/api/v1/auth/sign-in", json={"email": addr("n"), "password": "x-wrong-1"},
+                        headers={**h, "X-Forwarded-For": f"192.0.2.{i}, 203.0.113.50"}).status_code
+                 for i in range(limit + 1)]
+        assert codes[-1] == 429
+        other = c.post("/api/v1/auth/sign-in", json={"email": addr("n"), "password": "x-wrong-1"},
+                       headers={**h, "X-Forwarded-For": "203.0.113.51"}).status_code
+    assert other == 401  # a different real client behind the same proxy is not locked out
+
+
+def test_password_equal_to_the_email_is_refused_at_acceptance_and_reset(
+        web: TestClient, inbox: Inbox, app_engine: Engine, harbourview: ClinicCtx, owner: Account) -> None:
+    email = addr("sameasemail")
+    invite_by_operator(app_engine, harbourview, email, "staff")
+    tok = token_in(inbox.wait_for(email, "invited"))
+    web.cookies.clear()
+    h = csrf(web)
+    r = web.post("/api/v1/invites/accept", json={"token": tok, "password": email.upper()}, headers=h)
+    assert r.status_code == 422 and r.json()["fields"] == [{"field": "password", "code": "same_as_email"}]
+    assert web.post("/api/v1/invites/accept", json={"token": tok, "password": PASSWORD},
+                    headers=h).status_code == 200  # the link was not spent
+    web.cookies.clear()
+    h = csrf(web)
+    web.post("/api/v1/auth/reset-request", json={"email": owner.email}, headers=h)
+    rtok = token_in(inbox.wait_for(owner.email, "Reset"))
+    r = web.post("/api/v1/auth/reset", json={"token": rtok, "password": owner.email}, headers=h)
+    assert r.status_code == 422 and r.json()["fields"] == [{"field": "password", "code": "same_as_email"}]
+    assert web.post("/api/v1/auth/reset", json={"token": rtok, "password": "new-" + PASSWORD},
+                    headers=h).status_code == 200

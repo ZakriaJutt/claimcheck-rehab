@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import secrets
 import uuid
 from dataclasses import dataclass
@@ -81,10 +82,33 @@ def check_csrf(request: Request, bind: bool = False) -> None:
         raise ApiError(403, "csrf", "Reload the page and try again.")
 
 
+def _trusted(host: str, networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network]) -> bool:
+    try:
+        addr = ipaddress.ip_address(host.strip())
+    except ValueError:
+        return False
+    return any(addr in n for n in networks)
+
+
+def client_address(peer: str | None, forwarded_for: list[str], trusted_proxies: str) -> str:
+    """The client address for rate limits and audit (review observation S08). The direct TCP peer, unless
+    that peer is a configured trusted proxy; then the right-most X-Forwarded-For hop that is not itself a
+    trusted proxy. Hops to the left of it are written by the client and never believed."""
+    if not peer:
+        return "unknown"
+    networks = [ipaddress.ip_network(p.strip(), strict=False) for p in trusted_proxies.split(",") if p.strip()]
+    if not _trusted(peer, networks):
+        return peer
+    hops = [h.strip() for value in forwarded_for for h in value.split(",") if h.strip()]
+    for hop in reversed(hops):
+        if not _trusted(hop, networks):
+            return hop
+    return hops[0] if hops else peer
+
+
 def client_ip(request: Request) -> str:
-    # Direct peer address. Behind the production proxy (Caddy) this must read the proxy's forwarded
-    # address instead; recorded as open in the TRD.
-    return request.client.host if request.client else "unknown"
+    return client_address(request.client.host if request.client else None,
+                          request.headers.getlist("x-forwarded-for"), get_settings().trusted_proxies)
 
 
 def principal_dep(request: Request, engine: Engine = Depends(engine_dep)) -> Principal:

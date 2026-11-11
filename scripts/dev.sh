@@ -19,7 +19,9 @@ $VENV/pytest -q -p no:cacheprovider tests/unit/test_rules.py >/dev/null \
   || { echo "unhealthy: rule fixtures failed, nothing published"; exit 1; }
 
 "$0"-stop 2>/dev/null || true
-nohup $VENV/uvicorn --factory claimcheck_api.main:create_app --host 127.0.0.1 --port "${API_PORT:-8107}" \
+# S08: the server believes no proxy header; the app decides from TRUSTED_PROXIES (deps.client_address).
+FORWARDED_ALLOW_IPS="" nohup $VENV/uvicorn --factory claimcheck_api.main:create_app --no-proxy-headers \
+  --host 127.0.0.1 --port "${API_PORT:-8107}" \
   > "$RUN/api.log" 2>&1 & echo $! > "$RUN/api.pid"
 rm -f "$RUN/worker-heartbeat"  # B1-009: never accept a heartbeat left by an earlier run
 DATABASE_URL="$WORKER_DATABASE_URL" nohup $VENV/python -m claimcheck_worker.main > "$RUN/worker.log" 2>&1 &

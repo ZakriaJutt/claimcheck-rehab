@@ -252,7 +252,9 @@ ResetOutcome = Literal["reset", "invalid", "used", "expired", "weak_password", "
 def complete_reset(engine: Engine, token: str, new_password: str, client_ip: str) -> tuple[ResetOutcome, str | None]:
     if not rate_ok(engine, "public:ip", client_ip, get_settings().rate_public_per_ip):
         return "rate_limited", None
-    problem = passwords.policy_problem(new_password)
+    with system_session(engine) as s:
+        target = s.execute(text("SELECT cc_auth_reset_target(:h)"), {"h": token_hash(token)}).scalar()
+    problem = passwords.policy_problem(new_password, target)
     if problem:
         return "weak_password", problem
     with system_session(engine) as s:
@@ -296,7 +298,9 @@ def accept_invite(engine: Engine, token: str, password: str, client_ip: str
     st = get_settings()
     if not rate_ok(engine, "public:ip", client_ip, st.rate_public_per_ip):
         return "rate_limited", None, None
-    problem = passwords.policy_problem(password)
+    with system_session(engine) as s:
+        target = s.execute(text("SELECT cc_auth_invite_target(:h)"), {"h": token_hash(token)}).scalar()
+    problem = passwords.policy_problem(password, target)
     if problem:
         return "weak_password", None, problem
     with system_session(engine) as s:

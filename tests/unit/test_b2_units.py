@@ -128,3 +128,25 @@ def test_payload_purge_has_no_latest_batch_exception_and_removes_orphans() -> No
     assert list(store.objects) == [k_new]
     with pytest.raises(PermissionError):
         ClinicObjects(store, a).get(f"clinic/{a}/../{uuid.uuid4()}/jane_export/import_payload/x.json")
+
+
+def test_s08_client_address_trusts_only_configured_proxies() -> None:
+    from claimcheck_api.deps import client_address
+    # untrusted peer: X-Forwarded-For is ignored entirely
+    assert client_address("198.51.100.9", ["203.0.113.1"], "") == "198.51.100.9"
+    assert client_address("198.51.100.9", ["203.0.113.1"], "10.0.0.0/8") == "198.51.100.9"
+    # trusted peer: the right-most hop that is not a trusted proxy; hops to its left are the client's
+    assert client_address("10.0.0.5", ["1.2.3.4, 203.0.113.7"], "10.0.0.0/8") == "203.0.113.7"
+    assert client_address("10.0.0.5", ["1.2.3.4, 203.0.113.7, 10.0.0.9"], "10.0.0.0/8") == "203.0.113.7"
+    assert client_address("10.0.0.5", ["1.2.3.4", "203.0.113.7"], "10.0.0.0/8") == "203.0.113.7"
+    assert client_address("10.0.0.5", [], "10.0.0.0/8") == "10.0.0.5"
+    assert client_address("10.0.0.5", ["not-an-ip"], "10.0.0.0/8") == "not-an-ip"
+    assert client_address(None, ["1.2.3.4"], "") == "unknown"
+
+
+def test_s08_server_proxy_header_trust_is_off_in_the_start_command() -> None:
+    from tests.conftest import ROOT
+    dev = (ROOT / "scripts/dev.sh").read_text()
+    assert "--no-proxy-headers" in dev and 'FORWARDED_ALLOW_IPS=""' in dev
+    example = (ROOT / ".env.example").read_text()
+    assert "TRUSTED_PROXIES=" in example and "FORWARDED_ALLOW_IPS=" in example
