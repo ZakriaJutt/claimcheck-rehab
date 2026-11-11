@@ -56,7 +56,7 @@ Design decisions:
 | Reopened | "You marked this as submitted on 3 Nov. Jane's export of 10 Nov still shows it as unsubmitted, so it's back on your list. 6 days left." |
 | Not checked | "Not checked: Jane's export has no crash date for this claim, so we can't tell whether the visit is inside ICBC's first 12 weeks. We checked the policy end date instead." |
 | Stale data | "This list is based on the Jane export of 2 Nov (9 days ago). Deadlines are counted to today, but anything invoiced or paid since then isn't shown. Upload a new export." |
-| Nothing found | "Nothing needs action from the 970 visits we checked. 43 visits could not be checked and 171 had no rules applied — these are not cleared. See which." |
+| Nothing found (shown only when nothing is unchecked, fix round 1 B1-001) | "Nothing needs action from the 1,013 visits we checked. 0 could not be checked and 171 had no rules applied." When any visit or row could not be checked the sentence is not shown; the "Could not check" copy below is used instead. |
 | Could not check | "43 visits could not be checked: Jane's export shows a claim state we don't recognise. They may be at risk. We've been alerted; meanwhile check them in Jane." |
 | ICBC marked submitted | "Jane shows this as submitted on 3 Nov, but Jane has no link to ICBC. Check ICBC's portal. If it isn't there, 6 days are left." |
 

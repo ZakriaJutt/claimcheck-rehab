@@ -59,10 +59,10 @@ State a fact once, in its home file; elsewhere cite the ID.
 | `make test-clean` | exists | `make test` then `scripts/check_migrations.py` on the test database |
 | `make lint`, `make typecheck` | exist | ruff and mypy (strict); eslint and tsc |
 | `make check-migrations` | exists | Single head, ORM parity, forced RLS policy on every `clinic_id` table, invalid indexes |
-| `scripts/publish_rules.py` | exists | Publishes export profile v1 and the rule catalogue; refuses without `--fixtures-passed` |
+| `scripts/publish_rules.py` | exists | Publishes export profile v1 and the rule catalogue; refuses without `--fixtures-passed`, and refuses when a stored version differs from the catalogue under the same number |
 | `make deploy`, `scripts/backfill_runner.py`, `scripts/seed_synthetic.py`, `scripts/restore_replay.py`, `scripts/phase0_links.sh`, `scripts/log_scan.py` | proposed | Not built in B1 |
 
-Local values: databases `claimcheck_dev` / `claimcheck_test`; application role `claimcheck_app` (NOSUPERUSER, NOBYPASSRLS); API port 8107; frontend port 3107 (reserved); Redis database 6 (reserved, unused). Credentials live only in the git-ignored `.env.local`.
+Local values: databases `claimcheck_dev` / `claimcheck_test`; application role `claimcheck_app` and worker role `claimcheck_worker` (both NOSUPERUSER, NOBYPASSRLS; only the worker role may run the job-queue functions); API port 8107; frontend port 3107 (reserved); Redis database 6 (reserved, unused). Credentials live only in the git-ignored `.env.local`.
 
 ## Utilities index (search here before writing a helper, R-03)
 
@@ -89,6 +89,7 @@ Local values: databases `claimcheck_dev` / `claimcheck_test`; application role `
 | Evaluation job, M-09 escapes, freshness | `evaluation.py` |
 | Staff outcomes with `If-Match` and idempotency | `outcomes.py` |
 | Band and cohort conversions; "nothing needs action" sentence | `measure.py` |
+| Week-list counts that add up to rows received; could-not-check rows; summary rule | `lists.py` (`week_counts`, `summary_sentence`, `banner`) |
 | Export profile v1 (placeholder headers `[A]`) | `profiles/jane_v1.json`, `seed.py` |
 | Browser minimiser | `packages/minimiser/src` (`minimise`, `claimToken`, `contentHash`, `rowRequests`) |
 

@@ -261,7 +261,7 @@ All fixtures are synthetic. The base fixture is "Harbourview Physio": 1,184 visi
 |---|---|---|
 | UT-01 | ICBC visit, service 2026-10-01, unsubmitted; evaluate on 10-14, 10-15, 11-01, 11-15, 11-16 | Clear; flag (limit 2026-11-15, submit by 11-14, delayed cash, not near-limit); near-limit date written as 11-01 (day 31); still delayed cash; discretionary permanent loss |
 | UT-02 | WorkSafeBC visit, service 2026-07-01, unsubmitted | Limit 2026-09-29, submit by 09-28 |
-| UT-03 | WorkSafeBC visit, service 2026-05-01, rejected; first rejection 2026-08-20, then unknown | Limit 2026-11-18; with unknown date, limit 2026-10-28. (Corrected in B1, 2026-11-11: the earlier service date 2026-03-01 lies before the loaded WorkSafeBC versions, so the engine must return `not_evaluated(no_rule_version)` for it; the arithmetic for that date, 2026-11-18 and 2026-08-28, is still checked on the pure limit function.) |
+| UT-03 | WorkSafeBC visit, service 2026-05-01, rejected; known not to have been rejected before 2026-08-20 (fix round 1: the input is an earliest-possible bound, B1-003), then no such date | Limit 2026-11-18; with unknown date, limit 2026-10-28. (Corrected in B1, 2026-11-11: the earlier service date 2026-03-01 lies before the loaded WorkSafeBC versions, so the engine must return `not_evaluated(no_rule_version)` for it; the arithmetic for that date, 2026-11-18 and 2026-08-28, is still checked on the pure limit function.) |
 | UT-04 | ICBC claim with 25, 26, and 22 treatments plus a next appointment; then policy maximum 35 | Clear; flag; warning; clear |
 | UT-05 | ICBC visit on 2026-08-25, crash 2026-06-01, no end date; then crash date and end date both null | Flag (period ended 2026-08-24); `not_evaluated(missing_dates)` **and** ICBC-01 still returns its own result |
 | UT-06 | Second Initial Visit on a claim; two sessions one day | ICBC-04 flag; ICBC-05 flag |
@@ -278,6 +278,7 @@ All fixtures are synthetic. The base fixture is "Harbourview Physio": 1,184 visi
 | UT-17 | ICBC visit, service 2026-10-01, Jane state submitted, unpaid; evaluate on 10-15 and 11-10; then outcome "portal: not received" | "Verify in ICBC's portal" with limit 2026-11-15 and days left shown both times; after the outcome, ICBC-01 applies and the item is near-limit |
 | UT-18 | WorkSafeBC claim with nine 19102 visits and two 19108 sessions by a support worker; a 19102 and a 19107 on one day | WSBC-07 counts 11 and warns; WSBC-04 flags the same-day pair |
 | UT-19 | Hand Therapy 30-minute session at 110.00 on 2026-09-26 and on 2026-09-28; every rule code queried for 2026-03-15 | `not_evaluated(no_rule_version)` on 09-26; clear on 09-28; every rule returns `not_evaluated`, none returns `clear` |
+| UT-20 | Fix round 1 regressions (B1-002 to B1-007): `partly_paid` on both payers and ICBC `rejected`; Hand Therapy before 2026-09-27; an ICBC visit with no claim link; a claim with no treatment count; the WorkSafeBC re-rejection case (service 2026-05-01, re-rejected 2026-09-15, nothing observed before); formatted health numbers; hyphenated surnames; an unrecognised payer | Balance flagged / `not_evaluated(icbc_rejected_no_rule)`, never only `clear`; could not check (`no_rule_version`); rules not evaluated with `RULE:reason`; limit 2026-10-28; guard refuses; `UNKNOWN` payer is could not check |
 
 ### Integration (real PostgreSQL)
 
@@ -302,6 +303,7 @@ All fixtures are synthetic. The base fixture is "Harbourview Physio": 1,184 visi
 | IT-17 | Plant a visit that passes PR-01 while present in imports and with no item or "could not check" entry | M-09 = 1 on the pilot report; operator alert; the visit appears in the escape list |
 | IT-18 | Insert a stored `invoice_ref` that passes the health-number check, bypassing the API; run `identifier_scan` | Alert raised; imports for the clinic paused |
 | IT-19 | Pilot clinic with 11 imports in 13 weeks, one week without an export | Report shows "11 of 13"; that week's email says no export arrived (MH-08 c, MH-09 c) |
+| IT-20 | Fix round 1 regressions (B1-001, B1-002, B1-003, B1-008, B1-009): rows with a null date or amount; exact and conflicting repeats; an unlinked visit and Hand Therapy before its date through the API; the re-rejection case through import and evaluation; the API role calling the queue functions; a published version edited under the same number | Rows listed as could not check, counts add up, no "nothing needs action"; listed with reasons; limit 2026-10-28, permanent certain on 2026-11-01; permission denied; publication refused |
 
 ### End-to-end (Playwright, staging)
 
@@ -315,7 +317,7 @@ All fixtures are synthetic. The base fixture is "Harbourview Physio": 1,184 visi
 | E2E-06 | Delete clinic data | Review step; password and code; confirmation |
 | E2E-07 | Whole primary flow by keyboard; axe scan on S-01, S-05, S-07, S-08, S-12 | No blocker; scan results recorded (not a conformance claim) |
 | E2E-08 | Refresh during processing; double Confirm | Same status; one batch |
-| E2E-09 | Import a fixture in which 43 ICBC and WorkSafeBC rows have an unrecognised state and nothing else is flagged | Review step shows the 43; the list says 970 checked, 43 could not be checked, 171 no rules applied; the words "nothing needs action" never appear without those counts; the Monday email carries the same three counts |
+| E2E-09 | Import a fixture in which 43 ICBC and WorkSafeBC rows have an unrecognised state and nothing else is flagged | Review step shows the 43; the list says 970 checked, 43 could not be checked, 171 no rules applied; the words "nothing needs action" do not appear at all, because 43 could not be checked (fix round 1, B1-001); the counts add up to the rows received; the Monday email carries the same three counts |
 
 ### Permission
 Each API route called as `staff`, `owner`, `operator`, signed-out and as a user of the other clinic; expected status asserted from the permission table in [schema.md](schema.md#5-permissions-tenant-boundary-uniqueness).
