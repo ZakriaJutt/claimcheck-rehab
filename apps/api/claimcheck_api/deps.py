@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
+import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import date
@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import Engine, text
 
+from claimcheck_core.auth.service import token_hash
 from claimcheck_core.dates import local_today
 from claimcheck_core.db import get_engine
 from claimcheck_core.settings import get_settings
@@ -39,8 +40,32 @@ def today_dep() -> date:
     return local_today()
 
 
+CSRF_COOKIE = "cc_csrf"
+PENDING_COOKIE = "cc_pending"
+
+
 def hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
+    return token_hash(token)
+
+
+def check_csrf(request: Request) -> None:
+    """Anti-forgery on every write (ASVS 3.5.1): a present Origin must be ours, and the double-submit
+    token in the X-CSRF-Token header must equal the cc_csrf cookie (SameSite=Strict)."""
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    origin = request.headers.get("Origin")
+    if origin is not None and origin.rstrip("/") != get_settings().public_base_url:
+        raise ApiError(403, "csrf", "Reload the page and try again.")
+    cookie = request.cookies.get(CSRF_COOKIE)
+    header = request.headers.get("X-CSRF-Token")
+    if not cookie or not header or not secrets.compare_digest(cookie, header):
+        raise ApiError(403, "csrf", "Reload the page and try again.")
+
+
+def client_ip(request: Request) -> str:
+    # Direct peer address. Behind the production proxy (Caddy) this must read the proxy's forwarded
+    # address instead; recorded as open in the TRD.
+    return request.client.host if request.client else "unknown"
 
 
 def principal_dep(request: Request, engine: Engine = Depends(engine_dep)) -> Principal:
@@ -55,10 +80,7 @@ def principal_dep(request: Request, engine: Engine = Depends(engine_dep)) -> Pri
         raise ApiError(401, "unauthenticated", "Sign in again.")
     if row["clinic_id"] is None or row["role"] not in ("owner", "staff"):
         raise ApiError(403, "forbidden", "This page is for clinic users.")
-    if request.method not in ("GET", "HEAD", "OPTIONS"):
-        csrf_cookie = request.cookies.get("cc_csrf")
-        if not csrf_cookie or request.headers.get("X-CSRF-Token") != csrf_cookie:
-            raise ApiError(403, "csrf", "Reload the page and try again.")
+    check_csrf(request)
     return Principal(row["user_id"], row["clinic_id"], row["role"])
 
 

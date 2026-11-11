@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from claimcheck_api.auth_routes import router as auth_router
 from claimcheck_api.deps import ApiError
 from claimcheck_api.routes import router
 from claimcheck_core import logging as cclog
@@ -45,11 +46,23 @@ def create_app() -> FastAPI:
         finally:
             cclog.reset_correlation_id(token)
         response.headers["X-Correlation-ID"] = cid
+        # B2 security headers: no sniffing, no framing, no referrer, nothing from the API cached.
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        if settings.cookie_secure and settings.app_env in ("staging", "production"):
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
     @app.exception_handler(ApiError)
     async def api_error(_: Request, exc: ApiError) -> JSONResponse:
-        return _error(exc.status_code, exc.code, str(exc.detail), exc.fields)
+        resp = _error(exc.status_code, exc.code, str(exc.detail), exc.fields)
+        if exc.headers:
+            resp.headers.update(exc.headers)
+        return resp
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
@@ -83,4 +96,5 @@ def create_app() -> FastAPI:
         return JSONResponse({"status": "ready", "migration": current})
 
     app.include_router(router)
+    app.include_router(auth_router)
     return app

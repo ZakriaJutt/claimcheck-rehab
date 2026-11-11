@@ -33,6 +33,8 @@ from claimcheck_core.logging import get_correlation_id
 from claimcheck_core.models import AuditEvent, ExportProfile, Finding, ImportBatch, ImportRow, Item, Visit
 from claimcheck_core.money import ZERO, cad
 from claimcheck_core.outcomes import InvalidEvent, StaleVersion, record_event
+from claimcheck_core.payloads import read_payload
+from claimcheck_core.storage import ObjectMissing, get_store
 from claimcheck_core.tenancy import tenant_session
 
 router = APIRouter(prefix="/api/v1")
@@ -155,6 +157,29 @@ def get_import(batch_id: uuid.UUID, p: Principal = Depends(principal_dep),
         return {"id": str(b.id), "status": b.status, "export_date": b.export_date.isoformat(),
                 "rows_received": b.rows_received, "rows_accepted": b.rows_accepted,
                 "rows_rejected": b.rows_rejected, "rows_duplicate": b.rows_duplicate, "rejected_rows": rejected}
+
+
+@router.get("/imports/{batch_id}/payload")
+def get_import_payload(batch_id: uuid.UUID, p: Principal = Depends(principal_dep),
+                       engine: Engine = Depends(engine_dep)) -> Response:
+    """B2 (AD-11): the minimised payload as stored, for the batch's own clinic only. The object key is
+    read under row-level security and the store is bound to the caller's clinic prefix."""
+    with tenant_session(engine, p.clinic_id) as s:
+        b = s.get(ImportBatch, batch_id)
+        if b is None:
+            raise _not_found(engine, p, "import_batch", batch_id)
+        key, deleted = b.payload_object_key, b.payload_deleted_at
+    if key is None or deleted is not None:
+        raise ApiError(404, "payload_not_kept", "This import's rows are not kept any more.")
+    try:
+        data = read_payload(get_store(), p.clinic_id, key)
+    except ObjectMissing:
+        raise ApiError(404, "payload_not_kept", "This import's rows are not kept any more.") from None
+    with tenant_session(engine, p.clinic_id) as s:
+        write_audit(s, "import_payload_downloaded", "ok", p.clinic_id, p.user_id, "import_batch", batch_id,
+                    {"bytes": len(data)})
+    return Response(content=data, media_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="import-{batch_id}.json"'})
 
 
 # ------------------------------------------------------------------ lists

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from claimcheck_core.logging import get_correlation_id
@@ -33,3 +35,17 @@ def write_audit(
         clinic_id=clinic_id, actor_user_id=actor_user_id, action=action, outcome=outcome,
         object_type=object_type, object_id=object_id, meta=meta, correlation_id=uuid.UUID(cid),
     ))
+
+
+def write_global_audit(session: Session, action: str, outcome: str, actor_user_id: uuid.UUID | None = None,
+                       meta: dict[str, Any] | None = None) -> None:
+    """An event with no clinic (e.g. a sign-in attempt for an unknown address). Inserted without
+    RETURNING, because the read policy shows clinic rows only and would refuse to return it."""
+    meta = meta or {}
+    if _FORBIDDEN_META.intersection(meta):
+        raise ValueError("audit meta may hold counts and codes only")
+    cid = get_correlation_id() or str(uuid.uuid4())
+    session.execute(text(
+        "INSERT INTO audit_event (clinic_id, actor_user_id, action, object_type, object_id, outcome, "
+        "correlation_id, meta) VALUES (NULL, :u, :a, 'app_user', :u, :o, :c, CAST(:m AS jsonb))"),
+        {"u": actor_user_id, "a": action, "o": outcome, "c": uuid.UUID(cid), "m": json.dumps(meta)})

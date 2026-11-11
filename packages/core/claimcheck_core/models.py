@@ -12,6 +12,7 @@ from typing import Any
 
 from sqlalchemy import (
     ARRAY,
+    BigInteger,
     Boolean,
     CheckConstraint,
     Date,
@@ -19,6 +20,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -132,6 +134,9 @@ class ImportBatch(Base):
     expected_rows: Mapped[int | None] = mapped_column(Integer)
     correlation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # B2 (AD-11): the object-store key of the minimised payload, and when retention removed it.
+    payload_object_key: Mapped[str | None] = mapped_column(Text)
+    payload_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     __table_args__ = (
         CheckConstraint(
             "status IN ('receiving','processing','completed','completed_with_rejects','failed','rejected_guard')",
@@ -464,8 +469,64 @@ class AuditEvent(Base):
     __table_args__ = (Index("ix_audit_event_clinic_created", "clinic_id", literal_column("created_at DESC")),)
 
 
+class TotpCredential(Base):
+    __tablename__ = "totp_credential"
+    id: Mapped[uuid.UUID] = _pk()
+    created_at: Mapped[datetime] = _created()
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("app_user.id"), nullable=False,
+                                               unique=True)
+    secret_enc: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_step: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class RecoveryCode(Base):
+    __tablename__ = "recovery_code"
+    id: Mapped[uuid.UUID] = _pk()
+    created_at: Mapped[datetime] = _created()
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("app_user.id"), nullable=False)
+    code_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (UniqueConstraint("user_id", "code_hash", name="recovery_code_user_id_code_hash_key"),)
+
+
+class Invite(Base):
+    __tablename__ = "invite"
+    id: Mapped[uuid.UUID] = _pk()
+    created_at: Mapped[datetime] = _created()
+    clinic_id: Mapped[uuid.UUID] = _clinic_fk()
+    email: Mapped[str] = mapped_column(CITEXT, nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    invited_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("app_user.id"))
+    __table_args__ = (
+        CheckConstraint("role IN ('owner','staff')", name="invite_role_check"),
+        Index("ux_invite_pending", "clinic_id", "email", unique=True, postgresql_where=text("accepted_at IS NULL")),
+    )
+
+
+class PasswordReset(Base):
+    __tablename__ = "password_reset"
+    id: Mapped[uuid.UUID] = _pk()
+    created_at: Mapped[datetime] = _created()
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("app_user.id"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AuthAttempt(Base):
+    __tablename__ = "auth_attempt"
+    id: Mapped[uuid.UUID] = _pk()
+    created_at: Mapped[datetime] = _created()
+    bucket: Mapped[str] = mapped_column(Text, nullable=False)
+    __table_args__ = (Index("ix_auth_attempt_bucket_created", "bucket", "created_at"),)
+
+
 # Tables that carry clinic_id and therefore must have a row-level-security policy (R-05).
 CLINIC_OWNED_TABLES = (
     "app_user", "import_batch", "import_row", "claim", "visit", "visit_snapshot", "evaluation_run",
-    "finding", "item", "item_event", "job", "audit_event",
+    "finding", "item", "item_event", "job", "audit_event", "invite",
 )

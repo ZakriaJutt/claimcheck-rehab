@@ -46,7 +46,7 @@ External systems: Jane (source of files, no connection); ICBC HCPIR/HCPP and Tel
 | Where identifiers are removed | In the browser, before upload (AD-01) | More front-end code and a clinic-held key, in exchange for a server that holds no names, birth dates, health numbers or reversible claim numbers |
 | Rule engine | Python functions over typed rows, versioned by effective date (AD-04) | Rules are code and need a release to change, in exchange for testability |
 | Jobs | PostgreSQL table with `FOR UPDATE SKIP LOCKED`, one worker process (AD-05) | No Redis to run or secure; throughput limit is far above need |
-| Files | None stored (AD-02) | The clinic must keep its own exports if it wants to re-run history |
+| Files | No raw or identifiable file is ever stored (AD-01). Since B2 the minimised import payload is kept in a private object store for the `import_row` retention period only (AD-11, superseding AD-02 for that payload; owner approval pending) | The clinic must keep its own exports if it wants to re-run history |
 | AI | None in the pilot (AD-06) | The chat's remittance reading is deferred |
 
 ## 5. Building block view
@@ -75,7 +75,7 @@ flowchart TB
 | Frontend | Next.js 15 (React, TypeScript), server-rendered shell, client components for import and lists |
 | Backend | FastAPI, Pydantic v2, SQLAlchemy 2, Alembic |
 | Database | PostgreSQL 16 on Amazon RDS, row-level security |
-| Storage | None for clinic files. No object store in the MVP |
+| Storage | B2 (AD-11): one private S3 bucket (ca-central-1, SSE-KMS required by settings in staging and production; MinIO bucket `claimcheck-dev` locally) holding only the minimised import payload, one JSON object per completed batch, key `clinic/<clinic_id>/jane_export/import_payload/<batch_id>.json` |
 | Integration | Amazon SES (ca-central-1) for email. No payer or Jane integration |
 | Testing | pytest, Hypothesis for date rules, Vitest for the minimiser, Playwright with axe for end-to-end and accessibility |
 | Hosting | One EC2 instance (Docker Compose: web, api, worker, Caddy for TLS) and one RDS instance, both ca-central-1 |
@@ -88,7 +88,8 @@ flowchart TB
 - Sessions: opaque reference token, 128 bits from a CSPRNG, in an `HttpOnly; Secure; SameSite=Lax` cookie; stored hashed in `session`; idle timeout 30 minutes, absolute 12 hours; rotated at sign-in; all sessions of a user ended on removal or factor change.
 - Tenant = clinic location. Every clinic-owned table carries `clinic_id`. The API opens each request transaction with `SET LOCAL app.clinic_id`; RLS policies compare it; the application database role has no `BYPASSRLS`. The worker sets the same variable from `job.clinic_id` before touching rows. There is one tenancy module in `packages/core` and no other place that builds a clinic filter (R-05).
 - Operator requests run under a second database role that can read `clinic`, `import_batch` counts, `job`, `rule_*`, `export_profile` and `audit_event`, and nothing else, unless a live `support_grant` exists for that clinic.
-- No cache and no file store exist in the MVP, so there is no second place to enforce tenancy.
+- No cache exists. The object store (AD-11) is the second place that holds clinic rows; tenancy there is enforced by construction: application code reaches it only through `storage.ClinicObjects`, bound to the caller's clinic, which builds keys under `clinic/<clinic_id>/` from closed source and purpose lists and refuses any other key; the object key itself is read under row-level security from `import_batch`. No public or presigned URL is issued; the only download is the authorised endpoint `GET /imports/{id}/payload`.
+- **B2 implementation (2026-11-11).** Implemented as specified above, with these details: pending sign-in = a `session` row with `mfa_passed = false`, 5 minutes, in its own cookie `cc_pending` (`HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`), accepted by no data endpoint; the second factor revokes it and opens the full session under a new 256-bit token (`cc_session`, `HttpOnly; Secure; SameSite=Lax; Path=/`). TOTP: RFC 6238, SHA-1, 6 digits, 30 s, one step either side, a step never accepted twice (`totp_credential.last_used_step`); secrets sealed with AES-256-GCM under `TOTP_ENCRYPTION_KEY`. Recovery codes: ten, 120 bits each, SHA-256, single use. Passwords: argon2id; 8 to 128 characters; no composition rule; refused when on the common-password list (B2 interim list of about 100 entries, `auth/common_passwords.txt`; a published list of 3,000 or more is open) or equal to the email. Anti-forgery: a present `Origin` must equal `PUBLIC_BASE_URL`, and every write (sign-in included) carries `X-CSRF-Token` equal to the `cc_csrf` cookie (`SameSite=Strict`), issued by `GET /auth/csrf` and renewed at sign-in. Rate limits (fixed 15-minute windows in `auth_attempt`, keyed by a hash): sign-in 30 attempts per client address and 5 failures per account; second factor 5 failures per user; reset requests 3 per account; reset and invitation acceptance 30 per address; a limited request gets 429 with `Retry-After`. Every pre-authentication read or write goes through `SECURITY DEFINER` functions `cc_auth_*` owned by `claimcheck_auth_owner` (NOLOGIN, NOSUPERUSER, NOBYPASSRLS, NOINHERIT; search_path `pg_catalog, public, pg_temp`; EXECUTE for `claimcheck_app` only); the application role has no grant on `session`, `totp_credential`, `recovery_code`, `password_reset` or `auth_attempt`. The session lookup `cc_session_principal` is owned by `claimcheck_session_owner` (round-3 hardening). Client address: the direct peer; behind the production proxy it must be the forwarded address (open). Not built in B2: the operator's owner re-enrolment (ASVS 6.4.4), password change while signed in, factor change, re-authentication before deletion, operator sign-in.
 
 ### Import handling
 
@@ -107,15 +108,16 @@ Clinic key: generated in the owner's browser at onboarding, shown once as a 32-c
 
 | Method and path | Role | Purpose | Notes |
 |---|---|---|---|
-| POST `/auth/sign-in`, `/auth/mfa`, `/auth/sign-out` | any | Session | Rate-limited per account and IP |
+| GET `/auth/csrf`; POST `/auth/sign-in`, `/auth/totp/enrol`, `/auth/mfa`, `/auth/sign-out`; GET `/auth/me` | any | Session | Rate-limited per account and IP. B2: `/auth/mfa` takes `code` or `recovery_code`, and also confirms a new enrolment (then returns the ten recovery codes once) |
 | POST `/auth/reset-request`, `/auth/reset` | any | Password reset | Same response whether or not the email exists |
-| POST `/invites`; POST `/invites/{token}/accept` | owner; invitee | Users | Token single-use, 72 hours |
+| POST `/invites`; POST `/invites/accept` | owner; invitee | Users | Token single-use, 72 hours. B2: the token is sent in the body, not the path, so it never appears in an access log; the emailed link carries it in the URL fragment. The first owner of a clinic is invited by the operator with `scripts/invite_owner.py` |
 | GET, PATCH `/clinic` | owner | Profile, payers, location filter | |
 | POST `/agreement-acceptances` | owner | Record data-agreement version accepted | |
 | POST `/imports` | staff | Create batch | Idempotency key required; same key returns the existing batch |
 | POST `/imports/{id}/rows` | staff | Row batch | Idempotent on (batch, row number); 422 on guard failure |
 | POST `/imports/{id}/finalize` | staff | Start processing | 202; safe to repeat |
 | GET `/imports`, `/imports/{id}` | staff | History, status, rejected rows | Poll every 3 s while `processing` |
+| GET `/imports/{id}/payload` | staff | B2 (AD-11): the stored minimised payload of a completed batch | 404 for another clinic (audited) and once retention removed it (`payload_not_kept`); `Cache-Control: no-store`; attachment |
 | GET `/items?view=week\|unpaid&class=&payer=&cursor=` | staff | Lists | Filters live in the URL |
 | GET `/items/{id}` | staff | Detail with findings and history | 404 for another clinic |
 | POST `/items/{id}/events` | staff | Resolve, reopen, dismiss | `If-Match` version; 409 on stale |
@@ -123,7 +125,7 @@ Clinic key: generated in the owner's browser at onboarding, shown once as a 32-c
 | GET `/items/export.csv` | staff | Streamed CSV | Not stored. Any cell beginning with `=`, `+`, `-` or `@` is prefixed with an apostrophe so a spreadsheet does not run it as a formula |
 | GET `/pilot-report`; POST `/time-logs` | owner; staff | Measurement | |
 | GET `/rule-changes` | staff | Published rule versions | |
-| GET, POST `/users`; DELETE `/users/{id}` | owner | Users | |
+| GET, POST `/users`; DELETE `/users/{id}` | owner | Users | B2: GET and DELETE built (users are added by invitation); DELETE disables the user and ends every session at once; 404 for another clinic's user; 409 on oneself |
 | GET `/data-export.csv`; POST `/deletion-requests` | owner | Take out and delete | Deletion needs password and code again |
 | POST, DELETE `/support-grants` | owner | Operator access for 72 hours | |
 | GET, POST `/ops/rule-versions`; POST `/ops/rule-versions/{id}/publish` | operator | Rule sets | Publish refused unless fixtures pass |
@@ -134,7 +136,7 @@ Errors use one shape: `{code, message, correlation_id, fields?}`.
 
 ### Configuration and secrets
 
-One typed settings module in `packages/core`, read from environment variables and validated at start; the API and worker fail to start on a missing or malformed value. Secrets (database URL, session pepper, SES credentials) live in AWS Systems Manager Parameter Store, ca-central-1. No secret is in the repository or in an image. `PUBLIC_BASE_URL` is the only source for links in email (R-16).
+One typed settings module in `packages/core`, read from environment variables and validated at start; the API and worker fail to start on a missing or malformed value. Secrets (database URL, `TOTP_ENCRYPTION_KEY`, SMTP credentials for SES) live in AWS Systems Manager Parameter Store, ca-central-1. B2: session tokens are 256-bit random values stored as SHA-256, so no session pepper is used. Email goes through SMTP only (`SMTP_*`: Mailpit at 127.0.0.1:1025 locally, the SES SMTP interface later), the object store through the S3 API (`S3_*`: MinIO locally, S3 in production with the instance role); both are chosen by settings alone. In staging and production the settings refuse a non-HTTPS or local `PUBLIC_BASE_URL`, `COOKIE_SECURE=false` and a missing `S3_SERVER_SIDE_ENCRYPTION`. No secret is in the repository or in an image. `PUBLIC_BASE_URL` is the only source for links in email (R-16).
 
 ### Jobs, retries, timeouts, idempotency
 
@@ -143,7 +145,7 @@ One typed settings module in `packages/core`, read from environment variables an
 | `import_finalize` | API | batch id | 120 s | 3, backoff 30 s / 2 min / 10 min | Batch `failed`, rows kept in staging 24 h, staff told to retry |
 | `evaluate_clinic` | After import; daily 05:00 Pacific | clinic id + local date + rule-set version | 120 s | 3 | Lists show "last evaluated" date banner; operator alert |
 | `weekly_email` | Monday 07:00 Pacific | clinic id + ISO week | 30 s | 5 | Operator alert; list still available |
-| `retention_purge` | Daily | local date | 300 s | 3 | Operator alert |
+| `retention_purge` | Daily | local date | 300 s | 3 | Operator alert. B2: built for stored import payloads only (per clinic, 24 hours after completion, latest completed batch with refused rows kept); `import_row`, sessions and audit expiry still not purged |
 | `identifier_scan` | Daily | clinic id + local date | 120 s | 3 | Operator alert; imports for the clinic paused until reviewed |
 | `deletion_execute` | Owner request | request id | 300 s | 3 | Operator alert; request stays `pending` |
 
@@ -363,6 +365,8 @@ OWASP ASVS 5.0.0 `[S: SRC-26]`. These are **planned controls, not evidence of co
 | Data protection | 14.1.1, 14.1.2, 14.2.1, 14.2.3, 14.3.2 |
 | Logging | 16.2.1, 16.2.5, 16.3.1, 16.3.2 |
 
+**B2 status (2026-11-11), implemented and tested** (requirement numbers outside the targeted list above are from the author's reading of ASVS 5.0.0 and have not been re-checked against SRC-26): 3.3.1 (cookies `Secure`), 3.5.1 (anti-forgery on every write), 6.1.1 (rate limits documented above), 6.2.1, 6.3.1, 6.3.3, 6.4.3, 6.5.1, 6.5.5, 7.2.1, 7.2.2, 7.2.3, 7.2.4, 7.3.1, 7.3.2, 7.4.1, 7.4.2, 11.4.2 (argon2id), 16.3.1 (sign-in, factor, invitation, reset and removal events in `audit_event`). **Partly:** 6.2.4 (list of about 100 entries, not 3,000). **Not implemented in B2:** 6.2.2 and 6.2.3 (password change while signed in), 6.4.4 (lost-factor identity proofing), 7.4.3 (end other sessions after a factor change: no factor change exists), 7.5.1 (re-authentication before deletion), 8.4.2, 14.3.3 (unchanged), V10 (no OAuth or OIDC: not needed by this design). Tests: `tests/integration/test_b2_auth.py`, `tests/unit/test_b2_units.py`.
+
 Stated gaps:
 
 | Requirement | Status | Why |
@@ -370,7 +374,7 @@ Stated gaps:
 | 14.3.3 (no sensitive data in browser storage other than session tokens) | **Not met** | The clinic key is held in IndexedDB as a non-extractable key. Accepted because the alternative is giving the key to the server. |
 | 6.3.6 (email not used as an authentication mechanism; Level 3) | Met by design, unverified | Email carries invitations and reset links; neither signs a user in without password and code. |
 | 16.4.3 (logs sent to a logically separate system) | Partly: CloudWatch is separate from the host; alerting on it is basic | |
-| V5 file handling (5.2.1, 5.2.2) | Not applicable while the server accepts no file | Becomes applicable with remittance upload |
+| V5 file handling (5.2.1, 5.2.2) | Not applicable while the server accepts no file | Becomes applicable with remittance upload. B2: still no file upload; the stored object is JSON the server wrote itself from validated rows, under a server-generated key (5.3.2 by construction) |
 | 8.2.3 field-level access | Not targeted | All roles in a clinic see the same fields |
 | 6.4.4 (identity proofing when a factor is lost) | Targeted, unverified | Flow under Identity and tenancy |
 | 14.2.7 (retention classification and automatic deletion; Level 3) and 14.2.4 | Targeted through the retention table in schema.md and the `retention_purge` job; unverified | |
@@ -406,6 +410,7 @@ Sensitive assets: clinic billing rows (pseudonymised personal information); the 
 | AD-07 | AWS ca-central-1 | Founder's VPS | Location of the VPS unknown; managed backups |
 | AD-08 | Email carries no row data | Send the list by email | Mailboxes are outside the agreement's controls |
 | AD-09 | Jane invoice number kept in clear | Tokenise it too | Staff must find the visit in Jane; the number means nothing outside Jane |
+| AD-11 (B2, 2026-11-11; owner approval pending) | Keep the minimised payload of each completed import in a private object store (S3 API) for the `import_row` retention period, keyed by clinic, source and purpose; downloads only through an authorised endpoint | Keep nothing outside PostgreSQL (AD-02) | Lead's B2 instruction of 2026-11-11. Supersedes AD-02 for the minimised payload only: raw Jane files are still never uploaded (AD-01). Brings back R-13, R-14 and R-16 for objects; R-13 and R-14 are answered by `storage.ClinicObjects` and `retention_purge` (verification register) |
 | AD-10 | Physiotherapy rule set only | Ship chiropractic and massage therapy as in the chat | Only the physiotherapy documents were read |
 
 ## 10. Quality requirements

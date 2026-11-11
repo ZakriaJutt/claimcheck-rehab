@@ -10,7 +10,7 @@ ENV := set -a; . ./.env.local; set +a;
 
 venv:
 	/opt/homebrew/bin/python3.12 -m venv dev/.venv
-	$(VENV)/pip install -q -e packages/core -e apps/api -e apps/worker pytest hypothesis httpx ruff mypy
+	$(VENV)/pip install -q -e packages/core -e apps/api -e apps/worker pytest hypothesis httpx ruff mypy "boto3-stubs[s3]"
 	cd packages/minimiser && npm install --no-audit --no-fund
 
 dev:

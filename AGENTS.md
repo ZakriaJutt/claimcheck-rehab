@@ -2,7 +2,7 @@
 
 Canonical instructions for any agent or developer working in this repository. [CLAUDE.md](CLAUDE.md) adds product-specific guidance and defers to this file.
 
-**State of the repository (2026-11-11, branch `feat/b1-foundation`):** the ten planning documents plus the B1 build (foundation and deterministic core). The owner authorised implementation on 2026-11-11, before the Phase 0 stop-rule decision (T-0.4.3) had been taken; that departure is recorded in [verification-report-fixing.md](verification-report-fixing.md#b1-implementation-record-2026-11-11) and the decision text in Decision.md is unchanged. Implemented: `packages/core`, `packages/minimiser`, `apps/api`, `apps/worker`, migrations, tests. Not implemented: `apps/web`, sign-in and second factor, invitations, email, deletion, export, deployment. Commands marked "exists" in [Commands (B1)](#commands-b1) have been run; every other command named anywhere is still **proposed**.
+**State of the repository (2026-11-11, branch `feat/b2-local-auth`):** the ten planning documents, the B1 build (foundation and deterministic core) and B2 (sign-in with password and TOTP, recovery codes, invitations, password reset, sessions, anti-forgery, rate limits, email through SMTP to the local Mailpit, the minimised import payload in the local MinIO object store under AD-11). The owner authorised implementation on 2026-11-11, before the Phase 0 stop-rule decision (T-0.4.3) had been taken; that departure is recorded in [verification-report-fixing.md](verification-report-fixing.md#b1-implementation-record-2026-11-11) and the decision text in Decision.md is unchanged. Implemented: `packages/core`, `packages/minimiser`, `apps/api`, `apps/worker`, migrations, tests. Not implemented: `apps/web`, the weekly email, deletion and export (MH-11), lost-factor re-enrolment, password change while signed in, operator sign-in, deployment. Commands marked "exists" in [Commands (B1, B2)](#commands-b1-b2) have been run; every other command named anywhere is still **proposed**.
 
 ## Reading order
 
@@ -46,23 +46,24 @@ State a fact once, in its home file; elsewhere cite the ID.
 
 - Read-only helper beside Jane. Never write to Jane, Teleplan, HCPIR or HCPP.
 - Physiotherapy, ICBC and WorkSafeBC only, until other payer documents are read and cited.
-- No AI function. No file storage. No cache. Adding any of these needs a new AD and a review of R-05, R-13, R-14 and R-16.
+- No AI function. No cache. No file storage except the minimised import payload under AD-11 (B2, owner approval pending), reached only through `storage.ClinicObjects`. Adding any other stored file, an AI function or a cache needs a new AD and a review of R-05, R-13, R-14 and R-16.
 - No build task before T-0.4.3 records "go".
 
-## Commands (B1)
+## Commands (B1, B2)
 
 | Command | Status | What it does |
 |---|---|---|
 | `make venv` | exists | Python 3.12 virtual environment at `dev/.venv`; npm install in `packages/minimiser` |
 | `make dev` / `make stop` | exists | `scripts/dev.sh`: checks PostgreSQL, migrates `claimcheck_dev`, runs the rule fixtures and only then publishes rules, starts the API on 8107 and the worker, checks `/healthz`, `/readyz` and the worker heartbeat; names the first unhealthy service. No web app on 3107 yet; no Redis (AD-05) |
-| `make test` | exists | Unit (pytest), integration (pytest against real PostgreSQL `claimcheck_test`, schema dropped and re-migrated at session start), minimiser (Vitest) |
+| `make test` | exists | Unit (pytest), integration (pytest against real PostgreSQL `claimcheck_test`, schema dropped and re-migrated at session start; B2 suites also against Mailpit and MinIO, cleaning up their messages and objects), minimiser (Vitest) |
 | `make test-clean` | exists | `make test` then `scripts/check_migrations.py` on the test database |
 | `make lint`, `make typecheck` | exist | ruff and mypy (strict); eslint and tsc |
 | `make check-migrations` | exists | Single head, ORM parity, forced RLS policy on every `clinic_id` table, invalid indexes |
 | `scripts/publish_rules.py` | exists | Publishes export profile v1 and the rule catalogue; refuses without `--fixtures-passed`, and refuses when a stored version differs from the catalogue under the same number |
+| `scripts/invite_owner.py` | exists (B2) | Operator: creates a clinic (or takes `--clinic-id`) and emails its first owner an invitation through SMTP; never prints the token |
 | `make deploy`, `scripts/backfill_runner.py`, `scripts/seed_synthetic.py`, `scripts/restore_replay.py`, `scripts/phase0_links.sh`, `scripts/log_scan.py` | proposed | Not built in B1 |
 
-Local values: databases `claimcheck_dev` / `claimcheck_test`; application role `claimcheck_app` and worker role `claimcheck_worker` (both NOSUPERUSER, NOBYPASSRLS; only the worker role may run the job-queue functions); non-login function owners `claimcheck_queue_owner` and `claimcheck_session_owner` (created by migrations); API port 8107; frontend port 3107 (reserved); Redis database 6 (reserved, unused). Credentials live only in the git-ignored `.env.local`.
+Local values: databases `claimcheck_dev` / `claimcheck_test`; application role `claimcheck_app` and worker role `claimcheck_worker` (both NOSUPERUSER, NOBYPASSRLS; only the worker role may run the job-queue functions); non-login function owners `claimcheck_queue_owner` and `claimcheck_session_owner` (created by migrations); API port 8107; frontend port 3107 (reserved); Redis database 6 (reserved, unused). B2: function owners `claimcheck_auth_owner` (sign-in functions) as well; Mailpit SMTP 127.0.0.1:1025 (inbox http://127.0.0.1:8025); MinIO S3 API http://127.0.0.1:9000, region `us-east-1`, bucket `claimcheck-dev`. Credentials and the TOTP key live only in the git-ignored `.env.local`; `.env.example` lists the variable names. `make test` needs PostgreSQL, Mailpit and MinIO running (the two B2 suites skip when Mailpit or MinIO is down; the import tests need MinIO, because the worker stores each completed payload).
 
 ## Utilities index (search here before writing a helper, R-03)
 
@@ -91,6 +92,13 @@ Local values: databases `claimcheck_dev` / `claimcheck_test`; application role `
 | Band and cohort conversions; "nothing needs action" sentence | `measure.py` |
 | Week-list counts that add up to rows received; could-not-check rows; summary rule | `lists.py` (`week_counts`, `summary_sentence`, `banner`) |
 | Export profile v1 (placeholder headers `[A]`) | `profiles/jane_v1.json`, `seed.py` |
+| Password policy, argon2id hashing, common-password list | `auth/passwords.py` (`policy_problem`, `hash_password`, `verify_password`) |
+| TOTP (RFC 6238), sealed secrets, recovery codes | `auth/totp.py` (`match_step`, `SecretBox`, `new_recovery_codes`) |
+| Sign-in, second factor, sign-out, reset, invitations, user removal, rate limits | `auth/service.py` (over the `cc_auth_*` functions) |
+| Email (SMTP; Mailpit locally), invitation and reset messages | `mail.py` (`SmtpMailer`, `MemoryMailer`, `invite_mail`, `reset_mail`, `send_safely`) |
+| Object store (S3 API; MinIO locally), clinic-bound keys | `storage.py` (`ClinicObjects`, `object_key`, `get_store`, `MemoryBlobStore`) |
+| Stored import payload: archive, read, retention purge, clinic deletion | `payloads.py` |
+| Audit event without a clinic | `audit.py` (`write_global_audit`) |
 | Browser minimiser | `packages/minimiser/src` (`minimise`, `claimToken`, `contentHash`, `rowRequests`) |
 
 ## Architecture conventions (proposed)

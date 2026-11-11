@@ -26,11 +26,16 @@ def _load_env_file() -> dict[str, str]:
 
 
 _file_env = _load_env_file()
-for key in ("TEST_DATABASE_URL", "TEST_MIGRATION_DATABASE_URL", "TEST_WORKER_DATABASE_URL"):
+B2_KEYS = ("TOTP_ENCRYPTION_KEY", "SMTP_HOST", "SMTP_PORT", "S3_BUCKET", "S3_REGION", "S3_ENDPOINT_URL",
+           "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY")
+for key in ("TEST_DATABASE_URL", "TEST_MIGRATION_DATABASE_URL", "TEST_WORKER_DATABASE_URL", *B2_KEYS):
     if key not in os.environ and key in _file_env:
         os.environ[key] = _file_env[key]
 os.environ["APP_ENV"] = "test"
 os.environ.setdefault("PUBLIC_BASE_URL", "http://localhost:3107")
+# Test-only values when .env.local does not supply them (synthetic, not a secret of any environment).
+os.environ.setdefault("TOTP_ENCRYPTION_KEY", "dGVzdC1vbmx5LXRvdHAta2V5LTMyLWJ5dGVzLWxvbmc=")
+os.environ.setdefault("S3_BUCKET", "claimcheck-dev")
 if "TEST_DATABASE_URL" in os.environ:
     os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
     os.environ["MIGRATION_DATABASE_URL"] = os.environ["TEST_MIGRATION_DATABASE_URL"]

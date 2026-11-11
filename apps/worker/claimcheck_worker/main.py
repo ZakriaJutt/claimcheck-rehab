@@ -19,8 +19,10 @@ from claimcheck_core.evaluation import evaluate_clinic, load_published_versions,
 from claimcheck_core.identifier_scan import identifier_scan
 from claimcheck_core.imports import finalize
 from claimcheck_core.jobs import ClaimedJob, claim_next, complete, enqueue_per_clinic, expire_leases
+from claimcheck_core.payloads import archive_payload, purge_payloads
 from claimcheck_core.rules.catalogue import rule_set_hash
 from claimcheck_core.settings import get_settings
+from claimcheck_core.storage import get_store
 from claimcheck_core.tenancy import system_session
 
 _log = cclog.get_logger("worker")
@@ -43,11 +45,17 @@ def run_job(job: ClaimedJob) -> None:
     if job.clinic_id is None:
         raise PermanentJobError("job without clinic")
     if job.kind == "import_finalize":
-        finalize(engine, job.clinic_id, uuid.UUID(job.payload["batch_id"]), _on_date(job))
+        batch_id = uuid.UUID(job.payload["batch_id"])
+        finalize(engine, job.clinic_id, batch_id, _on_date(job))
+        # B2 (AD-11): keep the minimised payload in the object store; a storage failure retries the job,
+        # and the repeated finalize is a no-op.
+        archive_payload(engine, get_store(), job.clinic_id, batch_id)
     elif job.kind == "evaluate_clinic":
         evaluate_clinic(engine, job.clinic_id, _on_date(job), job.payload.get("trigger", "daily"))
     elif job.kind == "identifier_scan":
         identifier_scan(engine, job.clinic_id, _on_date(job))
+    elif job.kind == "retention_purge":
+        purge_payloads(engine, get_store(), job.clinic_id, datetime.now(tz=UTC))
     elif job.kind == "staleness_check":
         staleness_check(engine, job.clinic_id, datetime.now(tz=UTC))
     else:
@@ -91,6 +99,7 @@ def schedule_daily(now: datetime) -> int:
     n = enqueue_per_clinic(engine, "evaluate_clinic", f"daily:{d}:{rhash}", {"trigger": "daily", "on_date": d})
     n += enqueue_per_clinic(engine, "identifier_scan", f"daily:{d}", {"on_date": d})
     n += enqueue_per_clinic(engine, "staleness_check", f"daily:{d}", {})
+    n += enqueue_per_clinic(engine, "retention_purge", f"daily:{d}", {})
     return n
 
 

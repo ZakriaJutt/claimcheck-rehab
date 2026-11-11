@@ -19,8 +19,9 @@ from sqlalchemy import Engine, create_engine, text
 from tests.conftest import ROOT
 
 TODAY = date(2026, 11, 10)
-CLINIC_TABLES = ("audit_event", "item_event", "item", "finding", "evaluation_run", "visit_snapshot", "visit",
-                 "claim", "import_row", "import_batch", "job", "session", "app_user", "clinic")
+CLINIC_TABLES = ("auth_attempt", "password_reset", "recovery_code", "totp_credential", "invite", "audit_event",
+                 "item_event", "item", "finding", "evaluation_run", "visit_snapshot", "visit", "claim",
+                 "import_row", "import_batch", "job", "session", "app_user", "clinic")
 
 
 def reset_and_migrate(owner_url: str) -> None:
@@ -84,6 +85,21 @@ def _clean(request: pytest.FixtureRequest) -> None:
         c.execute(text("TRUNCATE " + ", ".join(CLINIC_TABLES) + " CASCADE"))
 
 
+CREATED_CLINICS: list[uuid.UUID] = []
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _remove_test_objects() -> Iterator[None]:
+    """Cleanup of test objects: every object a test clinic left in the bucket is deleted at the end."""
+    yield
+    if not CREATED_CLINICS or not os.environ.get("S3_ENDPOINT_URL"):
+        return
+    from claimcheck_core.payloads import delete_clinic_objects
+    from claimcheck_core.storage import get_store
+    for cid in CREATED_CLINICS:
+        delete_clinic_objects(get_store(), cid)
+
+
 @dataclass
 class ClinicCtx:
     id: uuid.UUID
@@ -96,6 +112,7 @@ class ClinicCtx:
 
 def make_clinic(owner_engine: Engine, name: str) -> ClinicCtx:
     cid, oid, sid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    CREATED_CLINICS.append(cid)
     otok, stok, csrf = secrets.token_urlsafe(16), secrets.token_urlsafe(16), secrets.token_urlsafe(16)
     from claimcheck_api.deps import hash_token
     now = datetime.now(tz=UTC)
