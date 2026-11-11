@@ -1,5 +1,5 @@
 /** The minimised payload: exactly the 16 fields of schema.md section 2 plus row_no and line_no. */
-export type Payer = "ICBC" | "WSBC" | "OTHER";
+export type Payer = "ICBC" | "WSBC" | "OTHER" | "UNKNOWN";
 export type State = "unsubmitted" | "submitted" | "rejected" | "partly_paid" | "paid" | "unknown";
 export type Discipline = "physiotherapy" | "support" | "other";
 export type PolicyStatus = "open" | "closed" | "other";
@@ -63,5 +63,6 @@ export interface MinimisedImport {
     unmappedCodes: number;
     otherLocationRows: number;
     otherPayerRows: number;
+    unknownPayerRows: number;
   };
 }

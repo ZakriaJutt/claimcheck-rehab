@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MissingColumnsError,
+  RaggedRowError,
   UnmappedPractitionerError,
   contentHash,
   keyFromRecovery,
@@ -99,7 +100,8 @@ describe("UT-11 minimiser", () => {
   it("maps states, codes, payers and amounts; unknown wording becomes unknown and is counted", async () => {
     const out = await run();
     expect(out.visits).toHaveLength(4); // the other location's row is filtered out
-    expect(out.counts).toEqual({ unrecognisedStates: 1, unmappedCodes: 1, otherLocationRows: 1, otherPayerRows: 0 });
+    expect(out.counts).toEqual({ unrecognisedStates: 1, unmappedCodes: 1, otherLocationRows: 1, otherPayerRows: 0,
+      unknownPayerRows: 0 });
     expect(out.visits[1]!.submission_state).toBe("unknown");
     expect(out.visits[0]).toMatchObject({ billing_code: "ICBC-ST", amount_invoiced: "97.00", payer: "ICBC",
       discipline: "physiotherapy", line_no: 1 });
@@ -134,5 +136,48 @@ describe("MH-02 export shape", () => {
     const out = await run();
     const reqs = rowRequests(out, 3);
     expect(reqs.map((r) => (r.visits ?? r.claims ?? []).length)).toEqual([3, 1, 2]);
+  });
+});
+
+describe("fix round 1 regressions (reviewer cases M1, M2, M3, M6)", () => {
+  const H = ["Patient Name", "Invoice #", "Purchase Date", "Payer", "Billing Code", "Amount to Insurer",
+    "Insurer Payment", "Claim State", "State Changed", "Staff Member", "Claim #", "Location"];
+  const POL = "Claim #,Payer\r\nCLM-1,ICBC";
+  const good = "Zelda Q,INV-1,2026-10-01,ICBC,PT-ICBC-TX,97.00,0,Unsubmitted,,Pat Physio,CLM-1,Harbourview Main";
+  const go = async (rows: string[], pol = POL) =>
+    minimise([H.join(","), ...rows].join("\r\n"), pol, { profile, key: await keyFromRecovery(KEY1),
+      location: "Harbourview Main", practitioners: { "Pat Physio": "physiotherapy" } });
+
+  it("B1-005: a row with one more field than the header blocks the import and names the row", async () => {
+    const longer = "Quarrington,Zelda,INV-2,2026-10-01,ICBC,PT-ICBC-TX,97.00,0,Unsubmitted,,Pat Physio,CLM-1," +
+      "Harbourview Main";
+    const err = await go([good, longer]).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RaggedRowError);
+    expect((err as RaggedRowError).rowNumbers).toEqual([3]);
+    expect((err as Error).message).not.toContain("Zelda");
+  });
+
+  it("B1-005: a row with fewer fields than the header blocks the import", async () => {
+    await expect(go(["Zelda Q,INV-1,2026-10-01,ICBC"])).rejects.toThrow(RaggedRowError);
+    await expect(go([good], "Claim #,Payer\r\nCLM-1")).rejects.toThrow(RaggedRowError);
+  });
+
+  it("B1-005: Location before the name (reviewer M6) cannot shift a first name into invoice_ref", async () => {
+    const h = ["Location", "Staff Member", "Patient Name", "Invoice #", "Purchase Date", "Payer", "Billing Code",
+      "Amount to Insurer", "Insurer Payment", "Claim State", "State Changed", "Claim #"];
+    const row = "Harbourview Main,Pat Physio,Quarrington,Zelda,INV-1,2026-10-01,ICBC,PT-ICBC-TX,97.00,0,Unsubmitted,,CLM-1";
+    await expect(minimise(h.join(",") + "\r\n" + row, POL, { profile, key: await keyFromRecovery(KEY1),
+      location: "Harbourview Main", practitioners: { "Pat Physio": "physiotherapy" } })).rejects.toThrow(RaggedRowError);
+  });
+
+  it("B1-007: a practitioner named like a prototype member is unmapped, not a function", async () => {
+    await expect(go([good.replace("Pat Physio", "constructor")])).rejects.toThrow(UnmappedPractitionerError);
+  });
+
+  it("B1-007: unrecognised payer wording is UNKNOWN (could not check), listed insurers are OTHER", async () => {
+    const out = await go([good.replace(",ICBC,", ",ICBC Physiotherapy,"),
+      good.replace("INV-1", "INV-9").replace(",ICBC,", ",Pacific Blue Cross,")]);
+    expect(out.visits.map((v) => v.payer)).toEqual(["UNKNOWN", "OTHER"]);
+    expect(out.counts.unknownPayerRows).toBe(1);
   });
 });

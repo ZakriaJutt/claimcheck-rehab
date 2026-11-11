@@ -26,6 +26,18 @@ export class MissingColumnsError extends Error {
   }
 }
 
+/**
+ * A row with more or fewer fields than the header (e.g. an unquoted comma inside a name) would shift
+ * every later column: a name could land in the invoice-number field (HCF-2) or the location field
+ * (a visit silently filtered out, HCF-1). The whole import is blocked and the rows are named (B1-005).
+ */
+export class RaggedRowError extends Error {
+  constructor(public readonly report: string, public readonly rowNumbers: number[]) {
+    super(`The ${report} export has ${rowNumbers.length} row(s) whose number of fields differs from the ` +
+      `header (file rows ${rowNumbers.slice(0, 10).join(", ")}). Nothing was uploaded.`);
+  }
+}
+
 /** Shown only on the clinic's screen; the names never leave the browser. */
 export class UnmappedPractitionerError extends Error {
   constructor(public readonly practitioners: string[]) {
@@ -104,9 +116,11 @@ function table(report: "sales" | "policies", csv: string, rp: ReportProfile): Ta
   const trimmed = header.map((h) => h.trim());
   const missing = rp.required.filter((r) => !trimmed.includes(r));
   if (missing.length) throw new MissingColumnsError(report, missing);
+  const ragged = rows.flatMap((r, i) => (r.length === header.length ? [] : [i + 2]));
+  if (ragged.length) throw new RaggedRowError(report, ragged);
   const index = new Map<string, number>();
   const columns: ColumnReport[] = trimmed.map((h, i) => {
-    const field = rp.columns[h];
+    const field = Object.hasOwn(rp.columns, h) ? rp.columns[h] : undefined;
     if (field !== undefined) index.set(field, i);
     return { report, header: h, treatment: field !== undefined ? (TREATMENT[field] ?? "dropped") : "dropped" };
   });
@@ -122,21 +136,27 @@ function table(report: "sales" | "policies", csv: string, rp: ReportProfile): Ta
 }
 
 function lookup<T extends string>(map: Record<string, string>, raw: string | undefined, fallback: T): T {
-  const v = map[(raw ?? "").trim()];
-  return (v ?? fallback) as T;
+  const k = (raw ?? "").trim();
+  // Object.hasOwn: a value such as "constructor" must not resolve to a prototype member (B1-007).
+  return (Object.hasOwn(map, k) ? map[k] : fallback) as T;
+}
+
+function discipline(map: Record<string, Discipline>, who: string): Discipline | undefined {
+  return Object.hasOwn(map, who) ? map[who] : undefined;
 }
 
 export async function minimise(salesCsv: string, policiesCsv: string, opts: MinimiseOptions): Promise<MinimisedImport> {
   const { profile, key } = opts;
   const sales = table("sales", salesCsv, profile.sales);
   const policies = table("policies", policiesCsv, profile.policies);
-  const counts = { unrecognisedStates: 0, unmappedCodes: 0, otherLocationRows: 0, otherPayerRows: 0 };
+  const counts = { unrecognisedStates: 0, unmappedCodes: 0, otherLocationRows: 0, otherPayerRows: 0,
+    unknownPayerRows: 0 };
 
   const unmapped = new Set<string>();
   for (const row of sales.rows) {
     if ((sales.get(row, "location") ?? "").trim() !== opts.location) continue;
     const who = (sales.get(row, "practitioner") ?? "").trim();
-    if (!(who in opts.practitioners)) unmapped.add(who);
+    if (discipline(opts.practitioners, who) === undefined) unmapped.add(who);
   }
   if (unmapped.size) throw new UnmappedPractitionerError([...unmapped].sort());
 
@@ -150,8 +170,11 @@ export async function minimise(salesCsv: string, policiesCsv: string, opts: Mini
     const invoice = (sales.get(row, "invoice_ref") ?? "").trim() || null;
     const line = (lineCounter.get(invoice ?? "") ?? 0) + 1;
     lineCounter.set(invoice ?? "", line);
-    const payer = lookup<Payer>(profile.payer_map, sales.get(row, "payer"), "OTHER");
+    // Unrecognised payer wording is UNKNOWN (could not check), never OTHER: "ICBC Physiotherapy" must not
+    // leave the check as an extended-health payer (B1-007). Known other insurers are listed in the profile.
+    const payer = lookup<Payer>(profile.payer_map, sales.get(row, "payer"), "UNKNOWN");
     if (payer === "OTHER") counts.otherPayerRows++;
+    if (payer === "UNKNOWN") counts.unknownPayerRows++;
     const state = lookup<State>(profile.state_map, sales.get(row, "submission_state"), "unknown");
     if (state === "unknown") counts.unrecognisedStates++;
     const code = lookup(profile.billing_codes, sales.get(row, "billing_code"), "UNMAPPED");
@@ -168,7 +191,7 @@ export async function minimise(salesCsv: string, policiesCsv: string, opts: Mini
       amount_paid: amount(sales.get(row, "amount_paid")),
       submission_state: state,
       state_date: isoDate(sales.get(row, "state_date")),
-      discipline: opts.practitioners[(sales.get(row, "practitioner") ?? "").trim()] ?? "other",
+      discipline: discipline(opts.practitioners, (sales.get(row, "practitioner") ?? "").trim()) ?? "other",
       claim_token: claimNo ? await claimToken(key, claimNo) : null,
     });
   }
@@ -182,7 +205,7 @@ export async function minimise(salesCsv: string, policiesCsv: string, opts: Mini
     }
     const claimNo = (policies.get(row, "claim_number") ?? "").trim();
     if (!claimNo) continue;
-    const payer = lookup<Payer>(profile.payer_map, policies.get(row, "payer"), "OTHER");
+    const payer = lookup<Payer>(profile.payer_map, policies.get(row, "payer"), "UNKNOWN");
     const tok = await claimToken(key, claimNo);
     if (seen.has(`${tok}:${payer}`)) continue;
     seen.add(`${tok}:${payer}`);

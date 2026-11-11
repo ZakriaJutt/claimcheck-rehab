@@ -32,7 +32,8 @@
     },
     "required": ["Claim #", "Payer"]
   },
-  "payer_map": {"ICBC": "ICBC", "WorkSafeBC": "WSBC"},
+  "payer_map": {"ICBC": "ICBC", "WorkSafeBC": "WSBC", "Pacific Blue Cross": "OTHER", "Canada Life": "OTHER", "Manulife": "OTHER", "Sun Life": "OTHER", "Green Shield": "OTHER", "Private Pay": "OTHER"},
+  "_payer_map_note": "[A] Any payer wording not listed becomes UNKNOWN (could not check), never OTHER (fix round 1, B1-007). The clinic confirms its insurer list at onboarding.",
   "state_map": {"Unsubmitted": "unsubmitted", "Submitted": "submitted", "Rejected": "rejected", "Partially Paid": "partly_paid", "Paid": "paid"},
   "policy_status_map": {"Active": "open", "Closed": "closed"},
   "billing_codes": {
