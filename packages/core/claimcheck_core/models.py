@@ -372,7 +372,8 @@ class Item(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     __table_args__ = (
         CheckConstraint(
-            "money_class IN ('permanent_certain','permanent_discretionary','delayed_cash','admin_time','warning')",
+            "money_class IN ('permanent_certain','past_deadline_discretionary','confirmed_unpaid','delayed_cash',"
+            "'admin_time','warning')",
             name="item_money_class_check",
         ),
         CheckConstraint(
@@ -416,7 +417,7 @@ class ItemEvent(Base):
             name="item_event_kind_check",
         ),
         CheckConstraint(
-            "outcome IS NULL OR outcome IN ('submitted','verified_in_portal','portal_not_received',"
+            "outcome IS NULL OR outcome IN ('submitted','verified_in_portal','portal_not_received','payer_declined',"
             "'corrected_resubmitted','treatment_plan_requested','written_off','not_an_error')",
             name="item_event_outcome_check",
         ),

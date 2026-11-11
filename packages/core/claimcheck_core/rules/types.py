@@ -9,9 +9,19 @@ from decimal import Decimal
 from typing import Any, Literal
 
 Outcome = Literal["flag", "clear", "not_evaluated"]
-MoneyClass = Literal["permanent_certain", "permanent_discretionary", "delayed_cash", "admin_time", "warning"]
+# C1 (2026-11-11): passing a payer deadline is not a confirmed loss. ICBC guide s. 6.1: invoices outside the
+# 45 days "may not be paid", at ICBC's sole discretion. So a date alone gives `past_deadline_discretionary`
+# ("past payer deadline - payment at payer's discretion"); only a recorded payer outcome gives
+# `confirmed_unpaid` ("confirmed unpaid (payer outcome recorded)"). `permanent_certain` is kept for rules whose
+# text says the amount cannot be paid or is not eligible (PR-03, PR-08 after the latest possible limit, a
+# paid amount below the schedule, PR-09 second visit).
+MoneyClass = Literal["permanent_certain", "past_deadline_discretionary", "confirmed_unpaid", "delayed_cash",
+                     "admin_time", "warning"]
+MONEY_CLASSES: tuple[str, ...] = ("permanent_certain", "past_deadline_discretionary", "confirmed_unpaid",
+                                  "delayed_cash", "admin_time", "warning")
 CheckStatus = Literal["in_scope", "rules_not_evaluated", "could_not_check", "no_rules_applied"]
-PortalStatus = Literal["not_received", "verified"] | None
+# "payer_declined": staff recorded the payer's outcome (checked in ICBC's portal) that it will not pay (C1).
+PortalStatus = Literal["not_received", "verified", "payer_declined"] | None
 
 ICBC = "ICBC"
 WSBC = "WSBC"

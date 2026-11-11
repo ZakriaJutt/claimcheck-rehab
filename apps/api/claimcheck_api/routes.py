@@ -187,16 +187,20 @@ def get_import_payload(batch_id: uuid.UUID, p: Principal = Depends(principal_dep
 
 # ------------------------------------------------------------------ lists
 
+# C1: "past payer deadline - payment at payer's discretion" and "confirmed unpaid (payer outcome recorded)"
+# are separate groups; neither is called lost from a date alone.
 GROUP_ORDER = ["could_not_check", "deadline_14_days", "can_still_be_collected", "check_before_next_visit",
-               "probably_lost", "lost", "jane_setup"]
+               "past_deadline_payer_discretion", "confirmed_unpaid", "lost", "jane_setup"]
 OPEN_STATUSES = ("open", "awaiting_confirmation")
 
 
 def _group(item: Item, today: date) -> str:
     if item.money_class == "permanent_certain":
         return "lost"
-    if item.money_class == "permanent_discretionary":
-        return "probably_lost"
+    if item.money_class == "past_deadline_discretionary":
+        return "past_deadline_payer_discretion"
+    if item.money_class == "confirmed_unpaid":
+        return "confirmed_unpaid"
     if item.money_class == "admin_time":
         return "jane_setup"
     if item.money_class == "warning":

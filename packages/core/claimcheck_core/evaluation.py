@@ -39,6 +39,11 @@ _log = get_logger("evaluation")
 DEADLINE_LOSS_RULES = ("ICBC-01", "WSBC-01", "WSBC-02")
 COVERING_RULES = frozenset({"ICBC-01", "ICBC-07", "WSBC-01", "WSBC-02", "WSBC-10"})
 ESCAPE_NOTICE_DAYS = 7
+PORTAL_OUTCOMES = {"portal_not_received": "not_received", "verified_in_portal": "verified",
+                   "payer_declined": "payer_declined"}
+# C1: a visit that passed a deadline is an escape whether the payer's rule makes the loss certain or leaves
+# payment at its discretion; M-09 counts both (HCF-1), it does not call either a confirmed loss.
+PAST_DEADLINE_CLASSES = frozenset({"permanent_certain", "past_deadline_discretionary"})
 COULD_NOT_CHECK_ALERT_SHARE = 0.05
 
 
@@ -68,8 +73,8 @@ def _portal_and_outcomes(s: Session) -> tuple[dict[uuid.UUID, str | None], dict[
     for item_id, kind, outcome, created_at, visit_id in s.execute(q):
         if kind == "outcome":
             last_outcome[item_id] = local_date_of(created_at)
-            if visit_id and outcome in ("portal_not_received", "verified_in_portal"):
-                portal[visit_id] = "not_received" if outcome == "portal_not_received" else "verified"
+            if visit_id and outcome in PORTAL_OUTCOMES:
+                portal[visit_id] = PORTAL_OUTCOMES[outcome]
         else:
             last_outcome.pop(item_id, None)
             if visit_id:
@@ -136,13 +141,13 @@ def find_escapes(
     items_before: dict[tuple[str, uuid.UUID, str], ItemState],
     status_before: dict[uuid.UUID, str | None],
 ) -> list[uuid.UUID]:
-    """M-09: visits now in permanent loss under a deadline rule, present in an import at least 7 days
-    before the limit, with no item flagged by the limit and no 'could not check' entry."""
+    """M-09: visits now past a deadline rule's limit (certain or at the payer's discretion), present in an
+    import at least 7 days before the limit, with no item flagged by the limit and no 'could not check' entry."""
     out: set[uuid.UUID] = set()
     for f in ev.findings:
         r = f.result
         if (f.target != "visit" or r.rule_code not in DEADLINE_LOSS_RULES or r.outcome != "flag"
-                or not (r.money_class or "").startswith("permanent") or r.limit_date is None):
+                or r.money_class not in PAST_DEADLINE_CLASSES or r.limit_date is None):
             continue
         v = visits[f.target_id]
         if v.first_seen_export_date > add_days(r.limit_date, -ESCAPE_NOTICE_DAYS):

@@ -2,7 +2,7 @@
 
 Canonical instructions for any agent or developer working in this repository. [CLAUDE.md](CLAUDE.md) adds product-specific guidance and defers to this file.
 
-**State of the repository (2026-11-11, branch `feat/b2-local-auth`):** the ten planning documents, the B1 build (foundation and deterministic core) and B2 (sign-in with password and TOTP, recovery codes, invitations, password reset, sessions, anti-forgery, rate limits, email through SMTP to the local Mailpit, the minimised import payload in the local MinIO object store under AD-11). The owner authorised implementation on 2026-11-11, before the Phase 0 stop-rule decision (T-0.4.3) had been taken; that departure is recorded in [verification-report-fixing.md](verification-report-fixing.md#b1-implementation-record-2026-11-11) and the decision text in Decision.md is unchanged. Implemented: `packages/core`, `packages/minimiser`, `apps/api`, `apps/worker`, migrations, tests. Not implemented: `apps/web`, the weekly email, deletion and export (MH-11), lost-factor re-enrolment, password change while signed in, operator sign-in, deployment. Commands marked "exists" in [Commands (B1, B2)](#commands-b1-b2) have been run; every other command named anywhere is still **proposed**.
+**State of the repository (2026-11-11, branch `feat/b2-local-auth`):** the ten planning documents, the B1 build (foundation and deterministic core) and B2 (sign-in with password and TOTP, recovery codes, invitations, password reset, sessions, anti-forgery, rate limits, email through SMTP to the local Mailpit, the minimised import payload in the local MinIO object store under AD-11). Correction round C1 (2026-11-11): money classes `past_deadline_discretionary` and `confirmed_unpaid` (migration `202611120100`), the free-audit look-back set, WorkSafeBC manual rules at version 2, one export definition and exact data wording; see [verification-report-fixing.md](verification-report-fixing.md#c1-corrections-2026-11-11-lead-checked-not-independently-reviewed). The owner authorised implementation on 2026-11-11, before the Phase 0 stop-rule decision (T-0.4.3) had been taken; that departure is recorded in [verification-report-fixing.md](verification-report-fixing.md#b1-implementation-record-2026-11-11) and the decision text in Decision.md is unchanged. Implemented: `packages/core`, `packages/minimiser`, `apps/api`, `apps/worker`, migrations, tests. Not implemented: `apps/web`, the weekly email, deletion and export (MH-11), lost-factor re-enrolment, password change while signed in, operator sign-in, deployment. Commands marked "exists" in [Commands (B1, B2)](#commands-b1-b2) have been run; every other command named anywhere is still **proposed**.
 
 ## Reading order
 
@@ -84,13 +84,14 @@ Local values: databases `claimcheck_dev` / `claimcheck_test`; application role `
 | Identifier guard checks (i)–(iv) | `intake/guard.py` (`check_rows`) |
 | Batches: create, stage, finalize | `imports.py` |
 | Daily stored-row scan | `identifier_scan.py` |
-| Rule catalogue with effective dates and citations | `rules/catalogue.py` |
+| Rule catalogue with effective dates and citations; versions superseded on publication (C1) | `rules/catalogue.py` (`SUPERSEDED`) |
 | Scope check and engine | `rules/engine.py` (`evaluate`, `scope_of`) |
 | ICBC and WorkSafeBC rule functions, deadline arithmetic | `rules/payer_rules.py` (`submission_limit`, `wsbc_correction_limit`) |
 | Item lifecycle (write-once near-limit date, class change, confirmation) | `items.py` (`next_item`) |
 | Evaluation job, M-09 escapes, freshness | `evaluation.py` |
 | Staff outcomes with `If-Match` and idempotency | `outcomes.py` |
-| Band and cohort conversions; "nothing needs action" sentence | `measure.py` |
+| Band and cohort conversions; free-audit look-back set and WorkSafeBC correction window (C1); "nothing needs action" sentence | `measure.py` (`audit_figures`, `in_lookback_set`, `wsbc_correction_window_open`) |
+| What the export answers versus what needs the payer's portal (C1) | `evidence.py` (`answers`) |
 | Week-list counts that add up to rows received; could-not-check rows; summary rule | `lists.py` (`week_counts`, `summary_sentence`, `banner`) |
 | Export profile v1 (placeholder headers `[A]`) | `profiles/jane_v1.json`, `seed.py` |
 | Password policy, argon2id hashing, common-password list | `auth/passwords.py` (`policy_problem`, `hash_password`, `verify_password`) |

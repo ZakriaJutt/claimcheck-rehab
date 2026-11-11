@@ -13,7 +13,7 @@ from typing import Any
 
 from sqlalchemy import Connection, text
 
-from claimcheck_core.rules.catalogue import catalogue_versions
+from claimcheck_core.rules.catalogue import SUPERSEDED, catalogue_versions
 
 
 def jane_profile() -> dict[str, Any]:
@@ -55,6 +55,9 @@ def publish_rules(conn: Connection, fixtures_passed: bool) -> int:
             drift.append(f"{v.rule_code} v{v.version}")
     if drift:
         raise CatalogueDrift("publication refused: stored versions differ from the catalogue: " + ", ".join(drift))
+    for code, ver in sorted(SUPERSEDED):  # C1: retire a replaced version before its successor goes in
+        conn.execute(text("UPDATE rule_version SET status = 'superseded' "
+                          "WHERE rule_code = :c AND version = :v AND status = 'published'"), {"c": code, "v": ver})
     n = 0
     for v in catalogue_versions():
         if (v.rule_code, v.version) in stored:

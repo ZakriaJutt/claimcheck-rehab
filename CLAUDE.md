@@ -7,14 +7,14 @@ Read [AGENTS.md](AGENTS.md) first; it is canonical. This file adds what is speci
 1. A BC physiotherapy clinic on Jane bills ICBC by re-keying each invoice into ICBC's portal and bills WorkSafeBC through Teleplan from Jane.
 2. ICBC wants the invoice within 45 calendar days of the visit; WorkSafeBC within 90, with a correction window after a rejection (PR-01, PR-07, PR-08 in [Decision.md](Decision.md#41-payer-rules-that-cause-non-payment-physiotherapy)).
 3. Jane shows invoice states and WorkSafeBC rejections; no Jane page read shows days left to those deadlines.
-4. Once a week staff export two Jane reports; the browser removes identifiers; the product returns a dated list.
+4. Once a week staff export two Jane reports (the same two serve the free audit: Sales over 365 days, Insurance Policies); the browser removes identifiers and exactly 16 billing fields leave the clinic; the product returns a dated list.
 5. Staff act in Jane or the payer's portal, mark the item, and the next export confirms it.
 
 The buyer is the clinic owner; the pilot is CAD 89 a month for three months after a free 90-day audit ([Decision.md section 7](Decision.md#7-offer-pilot-and-what-the-price-buys)).
 
 ## The question every change must serve
 
-What can a BC clinic recover **beyond Jane's existing rejection workflow**? Keep permanent loss, delayed cash and administrative time on separate lines, always. Never add them into one "savings" figure.
+What can a BC clinic recover **beyond Jane's existing rejection workflow**? Keep permanent loss, past payer deadline (payment at payer's discretion), confirmed unpaid, delayed cash and administrative time on separate lines, always. Never add them into one "savings" figure.
 
 ## Highest-consequence error
 
@@ -36,7 +36,10 @@ What can a BC clinic recover **beyond Jane's existing rejection workflow**? Keep
 - Do not use real clinic rows as fixtures, examples or prompts.
 - Do not treat `not_evaluated` as clear, hide it, or let it short-circuit other rules.
 - Do not let an unknown claim state, an unmapped code, an out-of-scope discipline or a service date outside the loaded rules read as fine; list and count them.
-- Do not treat Jane's "Submitted" mark on an ICBC invoice as proof that ICBC has it.
+- Do not treat Jane's "Submitted" mark on an ICBC invoice as proof that ICBC has it, accepted it or will pay it.
+- Do not call an amount lost, or confirmed unpaid, because a payer deadline passed: ICBC's guide s. 6.1 says late invoices "may not be paid", at its discretion. Only the payer's recorded outcome (`payer_declined`) gives "confirmed unpaid" (C1).
+- Do not limit an audit or import to the last 90 days of visits: older open invoices, including WorkSafeBC rejections still inside the PR-08 window, must be in the look-back set (C1).
+- Do not write "patient data stays in the clinic" or "never leaves": name the 16 fields that leave and where they are hosted (schema.md section 2).
 - Do not write "nothing needs action" without the counts of visits not checked.
 - Do not default a missing crash date, injury date, rejection date or fee; do not ask staff to invent one.
 - Do not use a payer figure from memory, from the decision brief or from a Jane guide; cite the payer's current document (two Jane guides were out of date on 2026-11-10).

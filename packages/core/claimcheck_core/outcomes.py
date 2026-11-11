@@ -20,6 +20,9 @@ OUTCOME_STATUS = {
     "corrected_resubmitted": "awaiting_confirmation",
     "treatment_plan_requested": "awaiting_confirmation",
     "portal_not_received": "open",  # ICBC-01 applies from the next evaluation
+    # C1: staff saw the payer's own outcome (ICBC's portal) refusing payment; the item stays open and
+    # becomes "confirmed unpaid" from the next evaluation. A later export showing payment clears it.
+    "payer_declined": "open",
     "written_off": "written_off",
     "not_an_error": "dismissed",
 }

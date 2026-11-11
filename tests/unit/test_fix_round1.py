@@ -92,7 +92,8 @@ def test_b1_010_items_between_bounds_are_not_lost_and_not_in_permanent_figures()
               submission_state="rejected", state_date=D("2026-09-10"), rejected_by=D("2026-09-10"))
     ev = run([v], on="2026-11-01")
     fig = audit_figures(ev, [v], D("2026-11-01"))
-    assert fig.wsbc_past_limit_balance == 0 and fig.wsbc_at_risk_balance == 95
+    assert fig.wsbc_past_correction_balance == 0 and fig.wsbc_past_deadline_balance == 0
+    assert fig.wsbc_at_risk_balance == 95
     item, _ = next_item(None, result(ev, v.id, "WSBC-02"), D("2026-11-01"), v)
     assert item is not None and item.money_class == "delayed_cash" and item.reached_near_limit_on is not None
     later = result(run([v], on="2026-12-10"), v.id, "WSBC-02")

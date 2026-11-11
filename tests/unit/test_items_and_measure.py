@@ -37,7 +37,7 @@ def test_ut10_near_limit_written_once_on_day_31() -> None:
     item, _ = _step(item, v, 40)
     assert item is not None and item.reached_near_limit_on == SERVICE + timedelta(days=31)
     item, ev = _step(item, v, 46)  # limit + 1: class changes that day (MH-04 c)
-    assert item is not None and item.money_class == "permanent_discretionary" and "class_changed" in ev
+    assert item is not None and item.money_class == "past_deadline_discretionary" and "class_changed" in ev
     assert item.class_at_first_flag == "delayed_cash" and item.first_flagged_on == SERVICE + timedelta(days=14)
 
 
@@ -95,9 +95,9 @@ def test_audit_figures_keep_lines_separate() -> None:
     near = visit(date_of_service=audit - timedelta(days=35))
     ev = run([lost_discretionary, lost_certain, near], [c], on=audit)
     fig = audit_figures(ev, [lost_discretionary, lost_certain, near], audit)
-    assert fig.permanent_icbc.discretionary_balance == Decimal("97.00")
-    assert fig.permanent_icbc.certain_balance == Decimal("97.00")  # not also counted as discretionary
-    assert fig.permanent_icbc.discretionary_monthly == Decimal("64.67")
+    assert fig.icbc_cohort.past_deadline_balance == Decimal("97.00")
+    assert fig.icbc_cohort.certain_balance == Decimal("97.00")  # not also counted as past deadline
+    assert fig.icbc_cohort.past_deadline_monthly == Decimal("64.67")
     assert fig.near_limit.monthly_by_rule["ICBC-01"] == Decimal("194.00")
 
 

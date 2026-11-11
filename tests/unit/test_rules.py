@@ -24,7 +24,7 @@ def test_ut01_icbc_45_day_limit_boundaries() -> None:
     r = result(run([v], on="2026-11-15"), v.id, "ICBC-01")
     assert (r.money_class, r.near_limit) == ("delayed_cash", True)  # limit day itself
     r = result(run([v], on="2026-11-16"), v.id, "ICBC-01")
-    assert r.money_class == "permanent_discretionary"
+    assert r.money_class == "past_deadline_discretionary"
     assert r.amount == Decimal("97.00")
 
 
@@ -38,7 +38,7 @@ def test_ut02_wsbc_90_day_limit() -> None:
     assert not r.near_limit
     assert result(run([v], on="2026-09-15"), v.id, "WSBC-01").near_limit  # day 76
     assert not result(run([v], on="2026-09-14"), v.id, "WSBC-01").near_limit  # day 75
-    assert result(run([v], on="2026-09-30"), v.id, "WSBC-01").money_class == "permanent_discretionary"
+    assert result(run([v], on="2026-09-30"), v.id, "WSBC-01").money_class == "past_deadline_discretionary"
 
 
 # ------------------------------------------------------------------ UT-03

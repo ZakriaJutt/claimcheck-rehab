@@ -123,6 +123,9 @@ def icbc_01(v: VisitIn, ver: RuleVersionIn, ctx: Context) -> Result:
     if v.submission_state == "unknown":
         return _ne(code, ver, R_UNKNOWN_STATE)
     limit, submit_by = submission_limit(v.date_of_service, p["limit_days"])
+    if v.portal_status == "payer_declined" and v.amount_paid == ZERO and v.submission_state != "paid":
+        # C1: the only route to "confirmed unpaid": staff recorded ICBC's own outcome (seen in its portal).
+        return _flag(code, ver, "payer_declined", "confirmed_unpaid", outstanding(v), limit, submit_by)
     if v.submission_state == "rejected" and v.portal_status != "not_received":
         # No ICBC correction rule has been read (B1-004): never clear, never guessed.
         return _ne(code, ver, R_ICBC_REJECTED_NO_RULE, limit_date=limit, submit_by=submit_by)
@@ -138,7 +141,9 @@ def icbc_01(v: VisitIn, ver: RuleVersionIn, ctx: Context) -> Result:
     if days < p["flag_after_days"]:
         return _clear(code, ver, limit_date=limit, submit_by=submit_by)
     if ctx.on_date > limit:
-        return _flag(code, ver, "past_limit_unsubmitted", "permanent_discretionary", outstanding(v),
+        # C1: ICBC guide s. 6.1 says such invoices "may not be paid", at ICBC's sole discretion. Past the
+        # deadline is not a confirmed loss: the payer's outcome is unknown until staff record it.
+        return _flag(code, ver, "past_limit_payer_discretion", "past_deadline_discretionary", outstanding(v),
                      limit, submit_by, near_limit=True)
     return _flag(code, ver, "not_invoiced", "delayed_cash", outstanding(v), limit, submit_by,
                  near_limit=days >= p["near_limit_from_day"])
@@ -221,8 +226,8 @@ def icbc_07(v: VisitIn, ver: RuleVersionIn, ctx: Context) -> Result:
     if v.submission_state == "unknown":
         return _ne(code, ver, R_UNKNOWN_STATE)
     limit, submit_by = submission_limit(v.date_of_service, p["limit_days"])
-    if v.portal_status == "not_received":
-        return _clear(code, ver)  # treated as unsubmitted: ICBC-01 applies
+    if v.portal_status in ("not_received", "payer_declined"):
+        return _clear(code, ver)  # ICBC-01 carries it (unsubmitted, or the payer's recorded outcome)
     if v.submission_state == "rejected":
         return _ne(code, ver, R_ICBC_REJECTED_NO_RULE, limit_date=limit, submit_by=submit_by)
     if v.submission_state == "partly_paid" and outstanding(v) > ZERO:
@@ -232,6 +237,11 @@ def icbc_07(v: VisitIn, ver: RuleVersionIn, ctx: Context) -> Result:
         return _clear(code, ver)
     if days_since(v.date_of_service, ctx.on_date) < p["flag_after_days"]:
         return _clear(code, ver, limit_date=limit, submit_by=submit_by)
+    if v.state_date is not None and v.state_date > limit:
+        # C1: Jane's export dates the "Submitted" mark after the 45-day limit. Payment is at ICBC's
+        # discretion; Jane's mark proves neither receipt nor payment, so staff confirm in ICBC's portal.
+        return _flag(code, ver, "submitted_after_limit_payer_discretion", "past_deadline_discretionary",
+                     outstanding(v), limit, submit_by)
     chase_from = add_days(v.state_date or v.date_of_service, p["chase_after_days"])
     reason = "chase_payment" if ctx.on_date >= chase_from else "verify_in_portal"
     if v.portal_status == "verified" and reason == "verify_in_portal":
@@ -275,7 +285,9 @@ def wsbc_01(v: VisitIn, ver: RuleVersionIn, ctx: Context) -> Result:
     if days < p["flag_after_days"]:
         return _clear(code, ver, limit_date=limit, submit_by=submit_by)
     if ctx.on_date > limit:
-        return _flag(code, ver, "past_limit_unsubmitted", "permanent_discretionary", outstanding(v),
+        # The manual sets the 90 days but Jane carries a Late Submission Reason (SRC-05): a late invoice
+        # is at WorkSafeBC's discretion, never a confirmed loss from the date alone (C1).
+        return _flag(code, ver, "past_limit_payer_discretion", "past_deadline_discretionary", outstanding(v),
                      limit, submit_by, near_limit=True)
     return _flag(code, ver, "not_invoiced", "delayed_cash", outstanding(v), limit, submit_by,
                  near_limit=days >= p["near_limit_from_day"])

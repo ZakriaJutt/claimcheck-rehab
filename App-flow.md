@@ -73,9 +73,9 @@ flowchart TD
 
 ### S-05 Import
 - **Story:** as staff I upload this week's exports and see exactly what leaves the clinic. **Entry:** agreement accepted; clinic key on this device (otherwise a prompt to enter it).
-- **Step 1 Choose:** two file inputs (Sales export, Insurance Policies export) with a link to the two-minute Jane steps. Drag-and-drop is optional; the file buttons do the same.
+- **Step 1 Choose:** two file inputs (Sales export, Insurance Policies export) with a link to the two-minute Jane steps. The same two exports serve the free audit and every week; the Jane steps set the Sales date range to the last 365 days, because a "last 90 days" export misses older open invoices, including WorkSafeBC rejections still correctable (C1). Drag-and-drop is optional; the file buttons do the same.
 - **Step 2 Review (nothing has been sent yet):** table of every column found: *Kept*, *Tokenised*, *Dropped*; counts of rows per payer; rows that cannot be read, with row numbers and reasons; rows whose claim state, billing code or service date the product will not be able to check, with counts; date range of the export.
-- **Step 3 Confirm:** "Upload 1,184 rows" (synthetic). This is the external action: data leaves the clinic. The button states the row count and the review table stays visible above it.
+- **Step 3 Confirm:** "Upload 1,184 rows" (synthetic). This is the external action: data leaves the clinic — exactly the 16 fields of [schema.md](schema.md#2-minimum-authorized-pilot-data), including the Jane invoice number in clear, to storage in Canada (AWS ca-central-1, proposed); the screen names them and says where they are kept (C1). The button states the row count and the review table stays visible above it.
 - **States:** *unknown export shape* (required column missing): blocked, names the column, "Send header row to support" sends only the header names; *wrong location*: zero rows after filter, explained; *processing in browser*: progress with count; *uploading*: progress by batch, Cancel stops and discards; *duplicate*: "These files were already uploaded on 2 Nov" → link to that import; *offline mid-upload*: resumes when the same files are chosen again.
 - **Destination:** S-06 for the new batch.
 - **Checks:** with the network tab open, the request body holds only the 16 fields; pressing Confirm twice creates one batch.
@@ -88,14 +88,14 @@ flowchart TD
 
 ### S-07 This week's list
 - **Story:** as staff I work through the visits that need action, nearest deadline first. **Entry:** at least one completed import.
-- **Visible:** banner with the date of the latest import and of the latest evaluation (warning if the import is over 8 days old); totals per class; a count line "could not check: N · no rules applied: N" that is always present; groups in this order: *Could not check* (first when not empty), *Deadline in 14 days or less*, *Can still be collected*, *Check before the next visit*, *Probably lost (payer's discretion)*, *Lost (payer rule)*, *Jane set-up*; each row: Jane invoice number, payer, service date, rule in plain words, deadline, days left, amount, status.
+- **Visible:** banner with the date of the latest import and of the latest evaluation (warning if the import is over 8 days old); totals per class; a count line "could not check: N · no rules applied: N" that is always present; groups in this order: *Could not check* (first when not empty), *Deadline in 14 days or less*, *Can still be collected*, *Check before the next visit*, *Past payer deadline – payment at payer's discretion*, *Confirmed unpaid (payer outcome recorded)*, *Lost (payer rule)*, *Jane set-up* (C1: no row is called lost from a date alone); each row: Jane invoice number, payer, service date, rule in plain words, deadline, days left, amount, status.
 - **Filters (in the URL):** payer, class, status, rule. **Actions:** open item; select rows and apply one outcome (up to 50); download CSV.
 - **States:** *empty, no import yet* → S-05; *empty, nothing flagged and everything checked* → "Nothing needs action from the 1,013 visits checked. 0 could not be checked and 171 had no rules applied", each count a link; *nothing flagged but some not checked* → no such sentence: the could-not-check group and the banner "43 could not be checked. They are not fine." (fix round 1, B1-001: "nothing needs action" only when every row was checked with all applicable rules evaluated); *stale data banner*; *loading skeleton*; *evaluation running* notice.
 - **Checks:** class totals equal the sum of rows; a `not_evaluated` finding is never shown as clear; an ICBC row that Jane shows as submitted still shows its 45-day limit; Back from S-08 restores filters and scroll position.
 
 ### S-08 Item detail
 - **Story:** I see why this visit is flagged and record what I did. **Visible:** invoice number with "find this in Jane" hint; payer; dates; amounts; each rule result for the visit (`flag`, `clear`, `not_evaluated` with reason); the rule text, version, effective dates and source; the visit's state history across imports; item history.
-- **Actions:** outcome — Submitted / Verified in ICBC's portal (received, or not received) / Corrected and resubmitted / Treatment plan requested / Written off / Not an error (reason chosen from a list); Undo last outcome; Next item.
+- **Actions:** outcome — Submitted / Verified in ICBC's portal (received, or not received) / Payer declined (ICBC's outcome seen in its portal; makes the item "confirmed unpaid", C1) / Corrected and resubmitted / Treatment plan requested / Written off / Not an error (reason chosen from a list); Undo last outcome; Next item.
 - **States:** *awaiting confirmation* (marked done, export not yet seen; for ICBC, until a payment or a portal verification is recorded); *reopened* ("marked submitted on 3 Nov; Jane's export of 10 Nov still shows Unsubmitted"); *conflict* (someone else changed it: shows their change, asks to re-apply); *permission denied or not found* → the same 404 page.
 - **Checks:** an outcome cannot be saved for "Not an error" without a reason; no outcome form has a free-text box; a second save of the same outcome changes nothing.
 
@@ -105,7 +105,7 @@ flowchart TD
 
 ### S-10 Pilot report
 - **Story:** as owner I see the result the pilot is judged on; as staff I log the week's minutes. **Visible to owner:** M-01 to M-04 with inputs, exports supplied out of 13, items reopened after being marked done, the refund test and its current value. **Staff input:** minutes spent chasing this week (one number), minutes spent exporting.
-- **States:** *not enough data yet* (before day 14) with what is missing; *audit only* (shows the look-back figures).
+- **States:** *not enough data yet* (before day 14) with what is missing; *audit only* (shows the look-back figures: rows in the 90-day window, older open rows, older WorkSafeBC rejections still correctable; each item says whether the export settles it or the payer's portal must confirm it, C1).
 - **Checks:** every figure links to the rows behind it; the near-limit date cannot be changed by any user; missed-deadline escapes (M-09) are shown even when zero.
 
 ### S-11 Users

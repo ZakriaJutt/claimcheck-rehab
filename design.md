@@ -28,13 +28,13 @@ Design decisions:
 
 - **Type:** system UI font stack. 16 px body, 14 px table secondary, 20 px section, 28 px page title; numerals tabular in tables; days-left figure 20 px semi-bold.
 - **Colour (text on white unless stated; all text pairs chosen for at least 4.5:1, borders and icons at least 3:1, to be measured in T-5.2.4):** ink `#1F2933`; muted `#52606D`; primary `#0B5CAD`; *Deadline soon* amber `#8A4B00` on `#FFF4E0`; *Lost* red `#9B1C1C` on `#FDECEC`; *Can still be collected* blue `#0B5CAD` on `#E8F1FB`; *Not checked* grey `#3E4C59` on `#EEF1F4` with a dashed border; *Confirmed* green `#1B6E3C` on `#E6F4EA`.
-- **Class chips:** icon + word: clock "Deadline soon", arrow-loop "Can still be collected", cross-circle "Lost (payer rule)", question-circle "Probably lost (payer's discretion)", gear "Jane set-up", dash "Not checked".
+- **Class chips:** icon + word: clock "Deadline soon", arrow-loop "Can still be collected", cross-circle "Lost (payer rule)", question-circle "Past payer deadline – payment at payer's discretion", circle-slash "Confirmed unpaid (payer outcome recorded)" (C1: "Probably lost" withdrawn), gear "Jane set-up", dash "Not checked".
 - **Components:** data table with sortable headers (buttons, with sort state exposed), filter bar of native selects, chip, banner (info, warning, error), stepper for S-05 and S-04, dialog for confirmations (focus trapped, Escape closes, focus returns to the trigger), toast only for non-critical confirmation and always mirrored in a live region, skeleton rows while loading.
 - **Targets:** every clickable target at least 24 × 24 CSS px; row actions 32 px high.
 
 ## 4. Principal screens, in enough detail to sketch
 
-**S-07 This week's list.** Title "This week" with the freshness chip ("Jane export of Mon 9 Nov · checked today") and, beside it, the permanent count line "970 checked · 43 could not be checked · 171 no rules applied". Below it three summary tiles in a row: *Deadline in 14 days or less — 7 visits — $679*; *Can still be collected — 12 — $1,164*; *Lost — 3 — $291 (payer rule $97, payer's discretion $194)*. Then the filter bar. Then grouped tables. Columns: checkbox · Days left (e.g. **6**) with the deadline date beneath · Jane invoice · Payer · Service date · Why (one sentence, e.g. "Not yet invoiced to ICBC") · Amount · Status. A sticky footer appears when rows are selected: "3 selected · Mark as… · Clear".
+**S-07 This week's list.** Title "This week" with the freshness chip ("Jane export of Mon 9 Nov · checked today") and, beside it, the permanent count line "970 checked · 43 could not be checked · 171 no rules applied". Below it three summary tiles in a row: *Deadline in 14 days or less — 7 visits — $679*; *Can still be collected — 12 — $1,164*; *Lost (payer rule) — 1 — $97*; *Past payer deadline, payer's discretion — 2 — $194* (shown apart, never added to Lost; C1). Then the filter bar. Then grouped tables. Columns: checkbox · Days left (e.g. **6**) with the deadline date beneath · Jane invoice · Payer · Service date · Why (one sentence, e.g. "Not yet invoiced to ICBC") · Amount · Status. A sticky footer appears when rows are selected: "3 selected · Mark as… · Clear".
 
 **S-08 Item detail.** Two columns. Left: header "Jane invoice 10432 · ICBC · Standard Treatment · $97.00"; a timeline bar from the service date to the limit with today marked and "6 days left — submit by Sat 21 Nov (ICBC limit Sun 22 Nov)"; a "Why this is flagged" card with the plain sentence, then "ICBC Physiotherapy program guide, section 6.1, effective 27 Sep 2026" and the rule version; a list "Other checks on this visit" with each result as a chip, including *Not checked — no crash date in the export*. Right: "What did you do?" radio group with the six outcomes, a reason list (shown for "Not an error"; no free text), Save; beneath it the history.
 
@@ -42,7 +42,7 @@ Design decisions:
 
 **S-10 Pilot report.** Four cards in the order M-01 to M-04, each with the figure, its plain definition, the inputs, and a link to the rows. A fifth card: "Refund test: $291 paid on near-limit items so far · threshold $267 · 11 of 13 exports supplied". A sixth, always shown: "Missed by ClaimCheck: 0".
 
-**S-12 Data.** A plain table "What we hold" (visits 4,712; claims 388; items 164; no names, birth dates or health numbers), retention dates, then three clearly separated actions with the destructive one last and outlined in red.
+**S-12 Data.** A plain table "What we hold" (visits 4,712; claims 388; items 164; the 16 billing fields per visit, including Jane invoice numbers; no names, birth dates or health numbers; hosted in Canada), retention dates, then three clearly separated actions with the destructive one last and outlined in red.
 
 ## 5. Interaction feedback and microcopy
 
@@ -59,6 +59,8 @@ Design decisions:
 | Nothing found (shown only when nothing is unchecked, fix round 1 B1-001) | "Nothing needs action from the 1,013 visits we checked. 0 could not be checked and 171 had no rules applied." When any visit or row could not be checked the sentence is not shown; the "Could not check" copy below is used instead. |
 | Could not check | "43 visits could not be checked: Jane's export shows a claim state we don't recognise. They may be at risk. We've been alerted; meanwhile check them in Jane." |
 | ICBC marked submitted | "Jane shows this as submitted on 3 Nov, but Jane has no link to ICBC. Check ICBC's portal. If it isn't there, 6 days are left." |
+| Past payer deadline (C1) | "Not invoiced within ICBC's 45 days (limit 4 Nov). ICBC may still pay it at its discretion. Submit it now and check the outcome in ICBC's portal; this is not counted as lost." |
+| Confirmed unpaid (C1) | "You recorded on 18 Nov that ICBC declined this invoice. Counted as confirmed unpaid. If a payment appears in a later Jane export, it leaves this group." |
 
 Tone: short sentences, the payer named, the date given, no blame, no exclamation marks.
 
