@@ -211,3 +211,27 @@ Reviewer's question on ICBC-07 after day 45 (negative days left in "deadline in 
 Commands after the fixes, from a freshly dropped and re-migrated `claimcheck_test`: `make test-clean` gives unit 58 passed, integration 45 passed, minimiser 13 passed, migration check pass; `make lint` clean (ruff, eslint); `make typecheck` clean (mypy strict on 37 files, tsc); `make dev` healthy with the new migration at head. mypy does not cover `tests/`.
 
 Documents changed in fix round 1: TRD.md (scope groups and row accounting, ICBC-01, ICBC-07, WSBC-02, WSBC-10, guard checks (i) and (ii), browser row-width check, worker role); schema.md (fix-round changes, payer `UNKNOWN`, `first_rejected_on` deprecated, `import_row` retention for rejected rows); PRD.md MH-03 (e) and MH-05 (e); App-flow.md S-07 empty state; design.md "Nothing found" copy; execution-plan.md UT-03 input wording, E2E-09 expectation, new UT-20 and IT-20; AGENTS.md (roles, `lists.py`, publication refusal); `profiles/jane_v1.json` (known insurers). Decision.md unchanged.
+
+### Round 2 retest verdicts (independent reviewer, copied unchanged from `claimcheck-rehab-b1-verdicts.json`)
+
+| ID | Reviewer verdict (round 2) |
+|---|---|
+| B1-001 | Closed |
+| B1-002 | Closed |
+| B1-003 | Closed |
+| B1-004 | Closed |
+| B1-005 | Closed |
+| B1-006 | Closed |
+| B1-007 | Closed |
+| B1-008 | Closed, part open: queue functions still owned by the local superuser; production definer owner (BYPASSRLS or policy on job) is a documented open item |
+| B1-009 | Closed |
+| B1-010 | Open (new, major, regression from the B1-003 fix): WSBC-02 marks permanent_certain once the earliest-possible limit passes, although the true limit may be later (backlog case: shown 2026-10-28, possible 2026-12-09) |
+
+### Edits after the round-2 retest (fixed after retest (round 2, 2026-11-11); not re-reviewed)
+
+| ID | Status | Fix | Tests |
+|---|---|---|---|
+| B1-010 | fixed after retest | WSBC-02 carries two bounds (coordinator ruling): "act by" = earliest possible limit; between earliest and latest possible limit the item is "check the first rejection date" (delayed cash, near-limit, never in "lost", never in a loss figure); certain permanent loss only after the latest possible limit; no latest bound, no certain loss. `finding.latest_limit_date` and the item row carry the latest bound; `measure.audit_figures` reports `wsbc_at_risk_balance` separately and the WorkSafeBC past-limit balance counts certain losses only. The earliest-bound rule is used only in WSBC-02, so no other rule changed. PRD M-02, TRD WSBC-02 and schema.md updated | UT-21: the reviewer's backlog case on 10-14, 10-28, 10-29, 12-09, 12-10 (both sides of both bounds), the A09 case, the item class change and the balances; IT-20 re-rejection case through import (act by 10-28, latest 12-14, certain on 12-15) |
+| B1-008 (open part) | fixed after retest | Migration `202611111500_round2`: queue functions owned by `claimcheck_queue_owner` (NOLOGIN, NOSUPERUSER, NOBYPASSRLS), with policies on `job` and `clinic` for that role only; search_path `pg_catalog, public, pg_temp`; same locally and in production. `cc_session_principal` remains owned by the migration user (open, not in the ruling) | `test_b1_008_queue_functions_have_a_dedicated_non_superuser_owner`; all worker-role job tests pass through the new owner |
+
+Commands after these edits, from a freshly dropped and re-migrated `claimcheck_test` (three revisions, single head): `make test-clean` gives unit 64 passed, integration 46 passed, minimiser 13 passed, migration check pass; `make lint` clean (ruff, eslint); `make typecheck` clean (mypy strict, tsc). The reviewer's notes are not changed: `rejected_not_before` still uses the first `unsubmitted` snapshot's export date, and the summary still reads only the latest completed batch.
