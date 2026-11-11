@@ -2,16 +2,24 @@
 
 After a batch completes, the worker writes the rows exactly as the browser sent them (the 16 fields and
 two ordinals; nothing else ever reaches the server) as one JSON object under the clinic's prefix.
-Guard-rejected and failed batches store nothing. Retention follows `import_row` (schema.md section 9):
-24 hours after completion, except that the latest completed batch with refused rows is kept until a later
-batch for the clinic completes. Clinic deletion removes every object under the clinic's prefix.
+Guard-rejected and failed batches store nothing.
+
+Retention (B2-S02 ruling): an object lives at most 24 hours, with no exception. The list of refused rows of
+the latest batch is read from `import_row` in PostgreSQL, never from the object. Three layers enforce it:
+(1) `purge_payloads`, run per clinic at least hourly, removes every object whose batch completed more than
+24 hours ago, every object older than 24 hours by its own timestamp, and every object with no
+`import_batch` record (an orphan left when a commit failed after the write) once it is an hour old;
+(2) `sweep_expired_objects`, run hourly by the worker over the whole bucket, removes payload objects older
+than 24 hours even for clinics that no longer exist; (3) the bucket lifecycle rule set by
+`scripts/setup_storage.py` expires tagged objects after one day if the worker is not running.
+Clinic deletion removes every object under the clinic's prefix.
 """
 
 from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import Engine, select
 
@@ -23,6 +31,7 @@ from claimcheck_core.tenancy import tenant_session
 SOURCE = "jane_export"
 PURPOSE = "import_payload"
 RETENTION = timedelta(hours=24)
+ORPHAN_GRACE = timedelta(hours=1)  # an object written moments ago may belong to a commit still in flight
 DONE = ("completed", "completed_with_rejects")
 
 
@@ -32,6 +41,8 @@ def archive_payload(engine: Engine, store: BlobStore, clinic_id: uuid.UUID, batc
         batch = s.get(ImportBatch, batch_id, with_for_update=True)
         if batch is None or batch.status not in DONE or batch.payload_object_key or batch.payload_deleted_at:
             return None
+        if batch.completed_at is not None and batch.completed_at < datetime.now(tz=UTC) - RETENTION:
+            return None  # a job retried late must not store rows that are already past their retention
         rows = list(s.scalars(select(ImportRow).where(ImportRow.batch_id == batch_id)
                               .order_by(ImportRow.kind, ImportRow.row_no)))
         doc = {
@@ -54,24 +65,43 @@ def read_payload(store: BlobStore, clinic_id: uuid.UUID, key: str) -> bytes:
 
 
 def purge_payloads(engine: Engine, store: BlobStore, clinic_id: uuid.UUID, now: datetime) -> int:
-    """The object part of `retention_purge` for one clinic. Returns the number of objects removed."""
+    """`retention_purge` for one clinic. Returns the number of objects removed."""
     removed = 0
+    objects = ClinicObjects(store, clinic_id)
     with tenant_session(engine, clinic_id) as s:
-        latest = s.scalars(select(ImportBatch).where(ImportBatch.status.in_(DONE))
-                           .order_by(ImportBatch.completed_at.desc()).limit(1)).first()
-        keep = latest.id if latest is not None and latest.status == "completed_with_rejects" else None
-        due = list(s.scalars(select(ImportBatch).where(
-            ImportBatch.payload_object_key.isnot(None), ImportBatch.payload_deleted_at.is_(None),
-            ImportBatch.status.in_(DONE), ImportBatch.completed_at < now - RETENTION)))
-        objects = ClinicObjects(store, clinic_id)
-        for b in due:
-            if b.id == keep or b.payload_object_key is None:
-                continue
-            objects.delete(b.payload_object_key)
-            b.payload_deleted_at = now
-            removed += 1
+        live = {b.payload_object_key: b for b in s.scalars(select(ImportBatch).where(
+            ImportBatch.payload_object_key.isnot(None), ImportBatch.payload_deleted_at.is_(None)))}
+        # (a) by the database: completed more than 24 hours ago, whatever the batch status
+        for key, b in list(live.items()):
+            if key and b.completed_at is not None and b.completed_at < now - RETENTION:
+                objects.delete(key)
+                b.payload_deleted_at = now
+                live.pop(key)
+                removed += 1
+        # (b) by the store: too old by its own timestamp, or not recorded in the database at all
+        for obj in objects.list_objects(SOURCE, PURPOSE):
+            age = now - obj.last_modified
+            orphan = obj.key not in live
+            if age > RETENTION or (orphan and age > ORPHAN_GRACE):
+                objects.delete(obj.key)
+                held = live.get(obj.key)
+                if held is not None:
+                    held.payload_deleted_at = now
+                removed += 1
         if removed:
             write_audit(s, "import_payload_purged", "ok", clinic_id, None, None, None, {"objects": removed})
+    return removed
+
+
+def sweep_expired_objects(store: BlobStore, now: datetime) -> int:
+    """Bucket-wide backstop, hourly from the worker: every payload object older than 24 hours, for any
+    clinic, including clinics whose rows are already gone."""
+    removed = 0
+    for obj in store.list_objects("clinic/"):
+        parts = obj.key.split("/")
+        if len(parts) == 5 and parts[2] == SOURCE and parts[3] == PURPOSE and now - obj.last_modified > RETENTION:
+            store.delete(obj.key)
+            removed += 1
     return removed
 
 

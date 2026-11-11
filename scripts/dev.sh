@@ -12,6 +12,8 @@ export APP_ENV PUBLIC_BASE_URL DATABASE_URL MIGRATION_DATABASE_URL WORKER_DATABA
 
 pg_isready -h localhost -p 5432 -q || { echo "unhealthy: postgresql (localhost:5432)"; exit 1; }
 (cd packages/core && ../../$VENV/alembic upgrade head) >/dev/null || { echo "unhealthy: migrations"; exit 1; }
+$VENV/python scripts/setup_storage.py >/dev/null \
+  || { echo "unhealthy: object store (bucket lifecycle rule not set; is MinIO on 127.0.0.1:9000?)"; exit 1; }
 $VENV/pytest -q -p no:cacheprovider tests/unit/test_rules.py >/dev/null \
   && $VENV/python scripts/publish_rules.py --fixtures-passed \
   || { echo "unhealthy: rule fixtures failed, nothing published"; exit 1; }

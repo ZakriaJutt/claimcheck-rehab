@@ -41,18 +41,28 @@ def _bucket(kind: str, value: str) -> str:
     return f"{kind}:{hashlib.sha256(value.strip().lower().encode()).hexdigest()[:32]}"
 
 
-def rate_ok(engine: Engine, kind: str, value: str, limit: int, record: bool = True) -> bool:
-    """Records an attempt (record=True) and says whether the bucket is within its limit. With
-    record=False it only looks; failures-only limits record through `rate_fail`."""
+def rate_ok(engine: Engine, kind: str, value: str, limit: int) -> bool:
+    """Records an attempt and says whether the bucket is within its limit (every attempt counts)."""
     window = get_settings().rate_window_seconds
-    fn = "cc_auth_rate_hit" if record else "cc_auth_rate_peek"
     with system_session(engine) as s:
-        return bool(s.execute(text(f"SELECT {fn}(:b, :w, :m)"),
+        return bool(s.execute(text("SELECT cc_auth_rate_hit(:b, :w, :m)"),
                               {"b": _bucket(kind, value), "w": window, "m": limit}).scalar())
 
 
-def rate_fail(engine: Engine, kind: str, value: str, limit: int) -> None:
-    rate_ok(engine, kind, value, limit, record=True)
+def rate_reserve(engine: Engine, kind: str, value: str, limit: int) -> uuid.UUID | None:
+    """Failures-only limits (B2-S01): in one database statement, before verifying, count the bucket and
+    take a slot if one is free. Parallel requests cannot all pass: at most `limit` are ever evaluated per
+    window. None means refused. A success gives the slot back with `rate_release`."""
+    window = get_settings().rate_window_seconds
+    with system_session(engine) as s:
+        v = s.execute(text("SELECT cc_auth_rate_reserve(:b, :w, :m)"),
+                      {"b": _bucket(kind, value), "w": window, "m": limit}).scalar()
+    return v if isinstance(v, uuid.UUID) else (uuid.UUID(str(v)) if v else None)
+
+
+def rate_release(engine: Engine, slot: uuid.UUID) -> None:
+    with system_session(engine) as s:
+        s.execute(text("SELECT cc_auth_rate_release(:i)"), {"i": slot})
 
 
 def audit(engine: Engine, action: str, outcome: str, clinic_id: uuid.UUID | None, user_id: uuid.UUID | None,
@@ -77,11 +87,12 @@ class SignIn:
 
 def sign_in(engine: Engine, email: str, password: str, client_ip: str) -> SignIn:
     st = get_settings()
-    # The address limit counts every attempt; the account limit counts failures only, so a user who
-    # signs in often is not locked out, while guessing one account stops after the limit.
+    # The address limit counts every attempt; the account limit counts failures only (a slot is taken
+    # before verifying and given back on success), so a user who signs in often is not locked out, while
+    # guessing one account stops after the limit however many requests run in parallel.
     ip_ok = rate_ok(engine, "signin:ip", client_ip, st.rate_signin_per_ip)
-    acct_ok = rate_ok(engine, "signin:acct", email, st.rate_signin_per_account, record=False)
-    if not (ip_ok and acct_ok):
+    slot = rate_reserve(engine, "signin:acct", email, st.rate_signin_per_account) if ip_ok else None
+    if slot is None:
         audit(engine, "sign_in", "rate_limited", None, None, {"limit": "ip" if not ip_ok else "account"})
         return SignIn("rate_limited")
     with system_session(engine) as s:
@@ -89,9 +100,10 @@ def sign_in(engine: Engine, email: str, password: str, client_ip: str) -> SignIn
     ok = passwords.verify_password(row["password_hash"] if row else None, password)
     if row is None or not ok or row["disabled"] or row["clinic_id"] is None:
         # Operators do not sign in through the clinic path in B2 (operator screens are not built).
-        rate_fail(engine, "signin:acct", email, st.rate_signin_per_account)
+        # The slot stays taken: this failure counts.
         audit(engine, "sign_in", "failed", row["clinic_id"] if row else None, row["user_id"] if row else None)
         return SignIn("bad_credentials")
+    rate_release(engine, slot)
     pending = new_token()
     with system_session(engine) as s:
         s.execute(text("SELECT cc_auth_session_open(:u, :h, false, :m)"),
@@ -154,7 +166,8 @@ def complete_mfa(engine: Engine, pending_token: str, code: str | None = None, re
     p = pending(engine, pending_token)
     if p is None:
         return MfaResult("expired")
-    if not rate_ok(engine, "mfa:user", str(p.user_id), st.rate_mfa_per_user, record=False):
+    slot = rate_reserve(engine, "mfa:user", str(p.user_id), st.rate_mfa_per_user)
+    if slot is None:
         audit(engine, "sign_in_mfa", "rate_limited", p.clinic_id, p.user_id)
         return MfaResult("rate_limited")
     if (code is None) == (recovery_code is None) or p.secret_enc is None:
@@ -165,7 +178,6 @@ def complete_mfa(engine: Engine, pending_token: str, code: str | None = None, re
         secret = totp.SecretBox(st.totp_encryption_key).open(p.secret_enc)
         step = totp.match_step(secret, code, now, p.last_used_step)
         if step is None:
-            rate_fail(engine, "mfa:user", str(p.user_id), st.rate_mfa_per_user)
             audit(engine, "sign_in_mfa", "failed", p.clinic_id, p.user_id, {"factor": "totp"})
             return MfaResult("invalid")
     else:
@@ -178,10 +190,10 @@ def complete_mfa(engine: Engine, pending_token: str, code: str | None = None, re
                          {"p": token_hash(pending_token), "n": token_hash(session_token), "st": step, "rc": rhash,
                           "m": st.session_absolute_minutes}).scalar()
     if user is None:
-        rate_fail(engine, "mfa:user", str(p.user_id), st.rate_mfa_per_user)
         audit(engine, "sign_in_mfa", "failed", p.clinic_id, p.user_id,
               {"factor": "totp" if code is not None else "recovery_code", "reason": "replay_or_used"})
         return MfaResult("invalid")
+    rate_release(engine, slot)
     codes: list[str] | None = None
     if not p.totp_confirmed:  # first confirmation: issue recovery codes, shown once
         codes = totp.new_recovery_codes()
@@ -194,6 +206,12 @@ def complete_mfa(engine: Engine, pending_token: str, code: str | None = None, re
     return MfaResult("signed_in", session_token, p.user_id, p.clinic_id, p.role, codes)
 
 
+def session_is_live(engine: Engine, token: str) -> bool:
+    with system_session(engine) as s:
+        return s.execute(text("SELECT 1 FROM cc_session_principal(:h, :m)"),
+                         {"h": token_hash(token), "m": get_settings().session_idle_minutes}).first() is not None
+
+
 def sign_out(engine: Engine, token: str) -> int:
     with system_session(engine) as s:
         return int(s.execute(text("SELECT cc_auth_session_revoke(:h)"), {"h": token_hash(token)}).scalar() or 0)
@@ -202,13 +220,20 @@ def sign_out(engine: Engine, token: str) -> int:
 # ---------------------------------------------------------------- reset
 
 
-def request_reset(engine: Engine, email: str, client_ip: str) -> tuple[str, str] | None:
-    """Returns (address, token) to send, or None. The caller answers the same way in every case."""
+def reset_allowed(engine: Engine, email: str, client_ip: str) -> bool:
+    """The request-time part of a reset request: the same two limit calls for every address."""
     st = get_settings()
-    if not (rate_ok(engine, "reset:ip", client_ip, st.rate_public_per_ip)
-            and rate_ok(engine, "reset:acct", email, st.rate_reset_per_account)):
+    ok = (rate_ok(engine, "reset:ip", client_ip, st.rate_public_per_ip)
+          and rate_ok(engine, "reset:acct", email, st.rate_reset_per_account))
+    if not ok:
         audit(engine, "password_reset_request", "rate_limited", None, None)
-        return None
+    return ok
+
+
+def issue_reset(engine: Engine, email: str) -> tuple[str, str] | None:
+    """Runs after the response has been sent (B2-S06), so whether the address exists does not change the
+    response time. Returns (address, token) to email, or None."""
+    st = get_settings()
     with system_session(engine) as s:
         row = s.execute(text("SELECT * FROM cc_auth_lookup(:e)"), {"e": email.strip()}).mappings().first()
     if row is None or row["disabled"] or row["clinic_id"] is None:

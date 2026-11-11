@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import secrets
 import uuid
 from dataclasses import dataclass
@@ -48,17 +51,33 @@ def hash_token(token: str) -> str:
     return token_hash(token)
 
 
-def check_csrf(request: Request) -> None:
-    """Anti-forgery on every write (ASVS 3.5.1): a present Origin must be ours, and the double-submit
-    token in the X-CSRF-Token header must equal the cc_csrf cookie (SameSite=Strict)."""
+def csrf_for_session(session_token: str) -> str:
+    """The anti-forgery token of one session (B2-S03): HMAC-SHA-256 of the session token under a key
+    derived from TOTP_ENCRYPTION_KEY with its own label. Another session's pair never matches."""
+    key = hmac.new(base64.b64decode(get_settings().totp_encryption_key), b"claimcheck-csrf-v1",
+                   hashlib.sha256).digest()
+    mac = hmac.new(key, session_token.encode(), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(mac).decode().rstrip("=")
+
+
+def check_csrf(request: Request, bind: bool = False) -> None:
+    """Anti-forgery on every write (ASVS 3.5.1): a present Origin must be ours. On a write made with a live
+    session (`bind=True`: every endpoint behind `principal_dep`, and sign-out of a live session) the
+    X-CSRF-Token header must be that session's own token (`csrf_for_session`, B2-S03). On the
+    pre-authentication endpoints (sign-in, second factor, reset, invitation), which act with no session's
+    authority, it must equal the cc_csrf cookie (double submit, SameSite=Strict), so a stale session cookie
+    left in the browser does not block signing in again."""
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
     origin = request.headers.get("Origin")
     if origin is not None and origin.rstrip("/") != get_settings().public_base_url:
         raise ApiError(403, "csrf", "Reload the page and try again.")
-    cookie = request.cookies.get(CSRF_COOKIE)
     header = request.headers.get("X-CSRF-Token")
-    if not cookie or not header or not secrets.compare_digest(cookie, header):
+    session_token = request.cookies.get(get_settings().session_cookie_name)
+    expected = csrf_for_session(session_token) if bind and session_token else request.cookies.get(CSRF_COOKIE)
+    if bind and not session_token:
+        expected = None
+    if not expected or not header or not secrets.compare_digest(expected, header):
         raise ApiError(403, "csrf", "Reload the page and try again.")
 
 
@@ -80,7 +99,7 @@ def principal_dep(request: Request, engine: Engine = Depends(engine_dep)) -> Pri
         raise ApiError(401, "unauthenticated", "Sign in again.")
     if row["clinic_id"] is None or row["role"] not in ("owner", "staff"):
         raise ApiError(403, "forbidden", "This page is for clinic users.")
-    check_csrf(request)
+    check_csrf(request, bind=True)
     return Principal(row["user_id"], row["clinic_id"], row["role"])
 
 

@@ -19,7 +19,7 @@ from claimcheck_core.evaluation import evaluate_clinic, load_published_versions,
 from claimcheck_core.identifier_scan import identifier_scan
 from claimcheck_core.imports import finalize
 from claimcheck_core.jobs import ClaimedJob, claim_next, complete, enqueue_per_clinic, expire_leases
-from claimcheck_core.payloads import archive_payload, purge_payloads
+from claimcheck_core.payloads import archive_payload, purge_payloads, sweep_expired_objects
 from claimcheck_core.rules.catalogue import rule_set_hash
 from claimcheck_core.settings import get_settings
 from claimcheck_core.storage import get_store
@@ -99,7 +99,24 @@ def schedule_daily(now: datetime) -> int:
     n = enqueue_per_clinic(engine, "evaluate_clinic", f"daily:{d}:{rhash}", {"trigger": "daily", "on_date": d})
     n += enqueue_per_clinic(engine, "identifier_scan", f"daily:{d}", {"on_date": d})
     n += enqueue_per_clinic(engine, "staleness_check", f"daily:{d}", {})
-    n += enqueue_per_clinic(engine, "retention_purge", f"daily:{d}", {})
+    return n
+
+
+_last_sweep_hour: str | None = None
+
+
+def schedule_hourly(now: datetime) -> int:
+    """B2-S02: the payload purge runs at least hourly (per clinic, as a job) and the bucket-wide sweep of
+    expired objects runs once an hour in this process. Idempotent per hour."""
+    global _last_sweep_hour
+    hour = now.astimezone(UTC).strftime("%Y-%m-%dT%H")
+    n = enqueue_per_clinic(get_engine(), "retention_purge", f"hourly:{hour}", {})
+    if _last_sweep_hour != hour:
+        try:
+            sweep_expired_objects(get_store(), now)
+            _last_sweep_hour = hour
+        except Exception as exc:  # noqa: BLE001 - retried next loop; the lifecycle rule is the backstop
+            cclog.log_event(_log, "sweep_failed", 40, error_type=type(exc).__name__)
     return n
 
 
@@ -128,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
         expire_leases(get_engine())
         if not args.no_schedule:
             schedule_daily(datetime.now(tz=UTC))
+            schedule_hourly(datetime.now(tz=UTC))
         worked = process_one()
         if args.once and not worked:
             break

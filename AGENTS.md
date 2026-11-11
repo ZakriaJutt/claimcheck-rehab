@@ -60,6 +60,7 @@ State a fact once, in its home file; elsewhere cite the ID.
 | `make lint`, `make typecheck` | exist | ruff and mypy (strict); eslint and tsc |
 | `make check-migrations` | exists | Single head, ORM parity, forced RLS policy on every `clinic_id` table, invalid indexes |
 | `scripts/publish_rules.py` | exists | Publishes export profile v1 and the rule catalogue; refuses without `--fixtures-passed`, and refuses when a stored version differs from the catalogue under the same number |
+| `scripts/setup_storage.py` | exists (B2-S02) | Sets the bucket lifecycle rule that expires stored payloads after 1 day; refuses a bucket with a policy; `--check` only verifies. `make dev` runs it and stops if it fails. Must be run against the production bucket |
 | `scripts/invite_owner.py` | exists (B2) | Operator: creates a clinic (or takes `--clinic-id`) and emails its first owner an invitation through SMTP; never prints the token |
 | `make deploy`, `scripts/backfill_runner.py`, `scripts/seed_synthetic.py`, `scripts/restore_replay.py`, `scripts/phase0_links.sh`, `scripts/log_scan.py` | proposed | Not built in B1 |
 
@@ -97,7 +98,9 @@ Local values: databases `claimcheck_dev` / `claimcheck_test`; application role `
 | Sign-in, second factor, sign-out, reset, invitations, user removal, rate limits | `auth/service.py` (over the `cc_auth_*` functions) |
 | Email (SMTP; Mailpit locally), invitation and reset messages | `mail.py` (`SmtpMailer`, `MemoryMailer`, `invite_mail`, `reset_mail`, `send_safely`) |
 | Object store (S3 API; MinIO locally), clinic-bound keys | `storage.py` (`ClinicObjects`, `object_key`, `get_store`, `MemoryBlobStore`) |
-| Stored import payload: archive, read, retention purge, clinic deletion | `payloads.py` |
+| Stored import payload: archive, read, retention purge (24 h, orphans), bucket-wide sweep, clinic deletion | `payloads.py` (`purge_payloads`, `sweep_expired_objects`) |
+| Failure-only rate limit reserved before verifying | `auth/service.py` (`rate_reserve`, `rate_release`) |
+| Anti-forgery token of a session | `apps/api/claimcheck_api/deps.py` (`csrf_for_session`, `check_csrf`) |
 | Audit event without a clinic | `audit.py` (`write_global_audit`) |
 | Browser minimiser | `packages/minimiser/src` (`minimise`, `claimToken`, `contentHash`, `rowRequests`) |
 

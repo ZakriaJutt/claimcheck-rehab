@@ -353,6 +353,7 @@ def test_b2_password_reset_through_mailpit(web: TestClient, inbox: Inbox, owner:
     # every earlier session ended; the reset did not sign anyone in
     web.cookies.set("cc_session", old_session)
     assert web.get("/api/v1/auth/me").status_code == 401
+    web.cookies.delete("cc_session")  # with a session cookie the unbound pair would be refused (B2-S03)
     # reused link refused
     r = web.post("/api/v1/auth/reset", json={"token": tok, "password": "other-" + PASSWORD}, headers=h)
     assert r.status_code == 400 and r.json()["code"] == "link_not_valid"
@@ -424,8 +425,179 @@ def test_b2_credential_tables_are_reachable_only_through_owned_functions(app_eng
             "has_function_privilege('claimcheck_worker', p.oid, 'EXECUTE'), "
             "has_function_privilege('claimcheck_app', p.oid, 'EXECUTE') "
             "FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner WHERE p.proname LIKE 'cc\\_auth\\_%'")).all()
-    assert len(rows) == 13
+    assert len(rows) == 14
     for name, owner, sup, bypass, login, secdef, config, worker_x, app_x in rows:
         assert (owner, sup, bypass, login, secdef, worker_x, app_x) == (
             "claimcheck_auth_owner", False, False, False, True, False, True), name
         assert "search_path=pg_catalog, public, pg_temp" in config, name
+
+
+# ---------------------------------------------------------------- security fixes after the B2 review
+
+
+def test_b2_s01_parallel_password_guesses_get_no_extra_tries(app_engine: Engine, owner: Account) -> None:
+    """Regression for reviewer S07: 30 parallel wrong passwords for one account from 30 addresses are
+    evaluated at most 5 times; the rest are refused before any password is checked."""
+    import concurrent.futures as cf
+    limit = get_settings().rate_signin_per_account
+    with cf.ThreadPoolExecutor(30) as ex:
+        out = list(ex.map(lambda i: service.sign_in(app_engine, owner.email, f"wrong-guess-{i}", f"203.0.113.{i}")
+                          .outcome, range(30)))
+    assert out.count("bad_credentials") <= limit
+    assert out.count("bad_credentials") + out.count("rate_limited") == 30
+    # and the right password is refused too until the window passes
+    assert service.sign_in(app_engine, owner.email, PASSWORD, "203.0.113.200").outcome == "rate_limited"
+
+
+def test_b2_s01_parallel_code_guesses_get_no_extra_tries(app_engine: Engine, owner: Account) -> None:
+    """Regression for reviewer S06: 40 parallel wrong codes on one pending sign-in: at most 5 evaluated."""
+    import concurrent.futures as cf
+    r = service.sign_in(app_engine, owner.email, PASSWORD, "198.51.100.1")
+    assert r.outcome == "pending" and r.pending_token
+    valid = {code_for(owner.secret, o) for o in (-1, 0, 1, 2)}
+    wrong = [f"{i:06d}" for i in range(100000, 100100) if f"{i:06d}" not in valid][:40]
+    tok = r.pending_token
+    with cf.ThreadPoolExecutor(40) as ex:
+        out = list(ex.map(lambda c: service.complete_mfa(app_engine, tok, c).outcome, wrong))
+    assert out.count("invalid") <= get_settings().rate_mfa_per_user
+    assert out.count("invalid") + out.count("rate_limited") == 40
+
+
+def test_b2_s01_successes_do_not_use_up_the_failure_limit(app_engine: Engine, owner: Account) -> None:
+    """The slot a correct password took is given back: only failures count toward the account limit."""
+    for i in range(4):
+        assert service.sign_in(app_engine, owner.email, f"wrong-{i}", "192.0.2.7").outcome == "bad_credentials"
+    assert service.sign_in(app_engine, owner.email, PASSWORD, "192.0.2.7").outcome == "pending"
+    assert service.sign_in(app_engine, owner.email, "wrong-5", "192.0.2.7").outcome == "bad_credentials"
+    assert service.sign_in(app_engine, owner.email, "wrong-6", "192.0.2.7").outcome == "rate_limited"
+
+
+def test_b2_s03_csrf_on_signed_in_writes_and_bound_to_the_session(web: TestClient, owner: Account,
+                                                                    inbox: Inbox) -> None:
+    """Regression for reviewer S09b and the 3.5.1 gap: every signed-in write refuses a missing token, a
+    foreign Origin, and a self-consistent token pair that belongs to no session or to another session."""
+    good = {"X-CSRF-Token": web.cookies.get("cc_csrf") or ""}
+    session = web.cookies.get("cc_session") or ""
+    calls = [("post", "/api/v1/invites", {"email": addr("csrf"), "role": "staff"}),
+             ("post", "/api/v1/imports", {"export_date": "2026-11-09", "profile_sales_version": 1,
+                                          "profile_policies_version": 1}),
+             ("delete", f"/api/v1/users/{uuid.uuid4()}", None),
+             ("post", "/api/v1/auth/sign-out", None)]
+    with TestClient(web.app, base_url="https://testserver") as attacker:
+        foreign = attacker.get("/api/v1/auth/csrf").json()["csrf"]  # unbound pair owned by the attacker
+    for method, path, body in calls:
+        extra = {"Idempotency-Key": "b" * 64} if "imports" in path else {}
+        variants = {
+            "missing": {**extra},
+            "foreign_pair": {**extra, "X-CSRF-Token": foreign},
+            "foreign_origin": {**extra, **good, "Origin": "https://evil.example"},
+        }
+        for name, headers in variants.items():
+            web.cookies.clear()
+            web.cookies.set("cc_session", session)
+            web.cookies.set("cc_csrf", foreign if name == "foreign_pair" else good["X-CSRF-Token"])
+            r = web.request(method.upper(), path, json=body, headers=headers)
+            assert r.status_code == 403 and r.json()["code"] == "csrf", (path, name, r.status_code)
+    # another signed-in user's own valid token does not work with this session
+    with TestClient(web.app, base_url="https://testserver") as other:
+        email = addr("csrf2")
+        web.cookies.clear()
+        web.cookies.set("cc_session", session)
+        web.cookies.set("cc_csrf", good["X-CSRF-Token"])
+        assert web.post("/api/v1/invites", json={"email": email, "role": "staff"}, headers=good).status_code == 201
+        accept_and_enrol(other, inbox, email, owner.clinic_id)
+        theirs = other.cookies.get("cc_csrf") or ""
+        assert theirs and theirs != good["X-CSRF-Token"]
+        r = web.post("/api/v1/invites", json={"email": addr("x"), "role": "staff"}, headers={"X-CSRF-Token": theirs})
+        assert r.status_code == 403
+    # the session's own token works, from the cookie or from GET /auth/csrf
+    assert web.get("/api/v1/auth/csrf").json()["csrf"] == good["X-CSRF-Token"]
+
+
+def test_b2_s06_reset_request_does_the_same_work_before_answering(app_engine: Engine, owner: Account,
+                                                                  owner_engine: Engine,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression for reviewer S17b: for a known and an unknown address the handler does the same work
+    before answering (two limit calls); the lookup, the reset row and the email run after the response."""
+    from fastapi import BackgroundTasks
+    from starlette.requests import Request
+
+    import claimcheck_api.auth_routes as routes
+    from claimcheck_api.auth_routes import EmailIn, post_reset_request
+    calls: list[str] = []
+    real = service.issue_reset
+    monkeypatch.setattr(routes.service, "issue_reset", lambda e, a: calls.append("issue") or real(e, a))
+    for email in (owner.email, addr("ghost")):
+        csrf = "c" * 43
+        req = Request({"type": "http", "method": "POST", "path": "/api/v1/auth/reset-request", "headers": [
+            (b"cookie", f"cc_csrf={csrf}".encode()), (b"x-csrf-token", csrf.encode())],
+            "client": ("192.0.2.50", 1), "query_string": b""})
+        bg = BackgroundTasks()
+        answer = post_reset_request(EmailIn(email=email), req, bg, app_engine)
+        assert answer == routes.RESET_ANSWER
+        assert calls == [] and [t.func for t in bg.tasks] == [routes._send_reset]  # nothing looked up yet
+        with owner_engine.connect() as c:
+            assert c.execute(text("SELECT count(*) FROM password_reset")).scalar() == 0
+
+
+def test_b2_s07_authentication_events_are_audited_without_values(web: TestClient, inbox: Inbox, owner: Account,
+                                                                  owner_engine: Engine) -> None:
+    """16.3.1: sign-in success and failure, second factor failure, invitation acceptance, reset and user
+    removal leave audit rows with codes and counts only."""
+    h = {"X-CSRF-Token": web.cookies.get("cc_csrf") or ""}
+    staff_email = addr("audited")
+    assert web.post("/api/v1/invites", json={"email": staff_email, "role": "staff"}, headers=h).status_code == 201
+    with TestClient(web.app, base_url="https://testserver") as other:
+        accept_and_enrol(other, inbox, staff_email, owner.clinic_id)
+        staff_id = other.get("/api/v1/auth/me").json()["user_id"]
+    assert web.delete(f"/api/v1/users/{staff_id}", headers=h).status_code == 204
+    web.cookies.clear()
+    hh = csrf(web)
+    web.post("/api/v1/auth/sign-in", json={"email": owner.email, "password": "wrong-password-1"}, headers=hh)
+    web.post("/api/v1/auth/sign-in", json={"email": owner.email, "password": PASSWORD}, headers=hh)
+    web.post("/api/v1/auth/mfa", json={"code": "000000" if code_for(owner.secret, 1) != "000000" else "111111"},
+             headers=hh)
+    web.post("/api/v1/auth/reset-request", json={"email": owner.email}, headers=hh)
+    tok = token_in(inbox.wait_for(owner.email, "Reset"))
+    assert web.post("/api/v1/auth/reset", json={"token": tok, "password": "new-" + PASSWORD},
+                    headers=hh).status_code == 200
+    with owner_engine.connect() as c:
+        rows = c.execute(text("SELECT action, outcome, meta::text, actor_user_id FROM audit_event "
+                              "WHERE clinic_id = :c"), {"c": owner.clinic_id}).all()
+    seen = {(a, o) for a, o, _, _ in rows}
+    for expected in [("invite_created", "ok"), ("invite_accept", "accepted"), ("mfa_enrolled", "ok"),
+                     ("sign_in", "ok"), ("sign_in", "failed"), ("sign_in_password", "ok"), ("sign_in_mfa", "failed"),
+                     ("user_removed", "ok"), ("password_reset_request", "ok"), ("password_reset", "reset")]:
+        assert expected in seen, expected
+    blob = " ".join(m for _, _, m, _ in rows)
+    for value in (owner.email, staff_email, PASSWORD, tok, owner.secret):
+        assert value not in blob
+
+
+def test_b2_s01_regression_stale_or_planted_session_cookie_does_not_block_sign_in(web: TestClient,
+                                                                                    owner: Account) -> None:
+    """Reviewer S01 after the B2-S03 fix: a planted or stale `cc_session` cookie must not block signing in,
+    and sign-in never adopts it (a new token is issued)."""
+    web.cookies.clear()
+    h = csrf(web)
+    planted = "attacker-chosen-session-value-" + uuid.uuid4().hex
+    web.cookies.set("cc_session", planted)
+    r = web.post("/api/v1/auth/sign-in", json={"email": owner.email, "password": PASSWORD}, headers=h)
+    assert r.status_code == 200, r.text
+    r = web.post("/api/v1/auth/mfa", json={"code": code_for(owner.secret, 1)}, headers=h)
+    assert r.status_code == 200, r.text
+    new = next(c.value for c in web.cookies.jar if c.name == "cc_session" and c.value != planted)
+    assert new and new != planted
+    web.cookies.clear()
+    web.cookies.set("cc_session", new)
+    assert web.get("/api/v1/auth/me").status_code == 200
+    # a dead session can still be signed out with the plain pair; a live one only with its own token
+    web.cookies.clear()
+    web.cookies.set("cc_session", planted)
+    web.cookies.set("cc_csrf", h["X-CSRF-Token"])
+    assert web.post("/api/v1/auth/sign-out", headers=h).status_code == 204
+    web.cookies.clear()
+    web.cookies.set("cc_session", new)
+    web.cookies.set("cc_csrf", h["X-CSRF-Token"])
+    assert web.post("/api/v1/auth/sign-out", headers=h).status_code == 403
+    assert web.post("/api/v1/auth/sign-out", headers={"X-CSRF-Token": r.json()["csrf"]}).status_code == 204

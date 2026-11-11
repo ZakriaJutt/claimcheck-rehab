@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -23,6 +24,15 @@ if TYPE_CHECKING:
 SOURCES = frozenset({"jane_export"})
 PURPOSES = frozenset({"import_payload"})
 EXTENSIONS = frozenset({"json"})
+# Every object carries this tag; the bucket lifecycle rule (scripts/setup_storage.py) expires tagged
+# objects after one day as a backstop to the hourly purge (B2-S02).
+PURPOSE_TAG = "purpose"
+
+
+@dataclass(frozen=True)
+class StoredObject:
+    key: str
+    last_modified: datetime
 
 
 class ObjectMissing(LookupError):
@@ -48,6 +58,12 @@ class BlobStore(Protocol):
     def get(self, key: str) -> bytes: ...
     def delete(self, key: str) -> None: ...
     def list_keys(self, prefix: str) -> list[str]: ...
+    def list_objects(self, prefix: str) -> list[StoredObject]: ...
+
+
+def _purpose_of(key: str) -> str:
+    parts = key.split("/")
+    return parts[3] if len(parts) == 5 and parts[0] == "clinic" else "unknown"
 
 
 class S3BlobStore:
@@ -58,7 +74,8 @@ class S3BlobStore:
 
     def put(self, key: str, data: bytes, content_type: str) -> None:
         extra: dict[str, Any] = {"ServerSideEncryption": self._sse} if self._sse else {}
-        self._c.put_object(Bucket=self._bucket, Key=key, Body=data, ContentType=content_type, **extra)
+        self._c.put_object(Bucket=self._bucket, Key=key, Body=data, ContentType=content_type,
+                           Tagging=f"{PURPOSE_TAG}={_purpose_of(key)}", **extra)
 
     def get(self, key: str) -> bytes:
         try:
@@ -71,10 +88,14 @@ class S3BlobStore:
         self._c.delete_object(Bucket=self._bucket, Key=key)
 
     def list_keys(self, prefix: str) -> list[str]:
-        keys: list[str] = []
+        return [o.key for o in self.list_objects(prefix)]
+
+    def list_objects(self, prefix: str) -> list[StoredObject]:
+        out: list[StoredObject] = []
         for page in self._c.get_paginator("list_objects_v2").paginate(Bucket=self._bucket, Prefix=prefix):
-            keys += [o["Key"] for o in page.get("Contents", []) if "Key" in o]
-        return keys
+            out += [StoredObject(o["Key"], o["LastModified"]) for o in page.get("Contents", [])
+                    if "Key" in o and "LastModified" in o]
+        return out
 
 
 @dataclass
@@ -82,9 +103,11 @@ class MemoryBlobStore:
     """Test double."""
 
     objects: dict[str, bytes] = field(default_factory=dict)
+    modified: dict[str, datetime] = field(default_factory=dict)
 
     def put(self, key: str, data: bytes, content_type: str) -> None:
         self.objects[key] = data
+        self.modified[key] = datetime.now(tz=UTC)
 
     def get(self, key: str) -> bytes:
         if key not in self.objects:
@@ -97,6 +120,9 @@ class MemoryBlobStore:
     def list_keys(self, prefix: str) -> list[str]:
         return sorted(k for k in self.objects if k.startswith(prefix))
 
+    def list_objects(self, prefix: str) -> list[StoredObject]:
+        return [StoredObject(k, self.modified[k]) for k in self.list_keys(prefix)]
+
 
 class ClinicObjects:
     """The only way application code reaches the store: bound to one clinic."""
@@ -106,11 +132,19 @@ class ClinicObjects:
         self._clinic = clinic_id
         self._prefix = clinic_prefix(clinic_id)
 
+    def prefix(self, source: str, purpose: str) -> str:
+        if source not in SOURCES or purpose not in PURPOSES:
+            raise ValueError("unknown source or purpose")
+        return f"{self._prefix}{source}/{purpose}/"
+
+    def list_objects(self, source: str, purpose: str) -> list[StoredObject]:
+        return self._store.list_objects(self.prefix(source, purpose))
+
     def key(self, source: str, purpose: str, object_id: uuid.UUID) -> str:
         return object_key(self._clinic, source, purpose, object_id)
 
     def _own(self, key: str) -> str:
-        if not key.startswith(self._prefix):
+        if not key.startswith(self._prefix) or ".." in key.split("/"):
             raise PermissionError("key outside this clinic's prefix")
         return key
 

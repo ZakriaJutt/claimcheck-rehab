@@ -111,3 +111,20 @@ def test_production_settings_refuse_local_links_and_plain_storage() -> None:
     r = _run("from claimcheck_core.settings import load_settings; load_settings()",
              {**ok, "TOTP_ENCRYPTION_KEY": "c2hvcnQ="})
     assert r.returncode == 2 and "TOTP_ENCRYPTION_KEY" in r.stderr
+
+
+def test_payload_purge_has_no_latest_batch_exception_and_removes_orphans() -> None:
+    """B2-S02 at unit level: objects older than 24 hours and orphans older than an hour go; the store
+    binding refuses a key with a `..` segment."""
+    from datetime import UTC, datetime, timedelta
+
+    from claimcheck_core.payloads import sweep_expired_objects
+    store = MemoryBlobStore()
+    a = uuid.uuid4()
+    k_old = ClinicObjects(store, a).put("jane_export", "import_payload", uuid.uuid4(), b"{}")
+    k_new = ClinicObjects(store, a).put("jane_export", "import_payload", uuid.uuid4(), b"{}")
+    store.modified[k_old] -= timedelta(hours=25)
+    assert sweep_expired_objects(store, datetime.now(tz=UTC)) == 1
+    assert list(store.objects) == [k_new]
+    with pytest.raises(PermissionError):
+        ClinicObjects(store, a).get(f"clinic/{a}/../{uuid.uuid4()}/jane_export/import_payload/x.json")

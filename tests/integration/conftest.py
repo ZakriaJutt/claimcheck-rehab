@@ -151,10 +151,13 @@ def api(app_engine: Engine) -> Iterator[TestClient]:
 
 
 def as_user(client: TestClient, ctx: ClinicCtx, role: str = "staff") -> dict[str, str]:
+    from claimcheck_api.deps import csrf_for_session
+    token = ctx.staff_token if role == "staff" else ctx.owner_token
+    csrf = csrf_for_session(token)  # the anti-forgery token is bound to the session (B2-S03)
     client.cookies.clear()
-    client.cookies.set("cc_session", ctx.staff_token if role == "staff" else ctx.owner_token)
-    client.cookies.set("cc_csrf", ctx.csrf)
-    return {"X-CSRF-Token": ctx.csrf}
+    client.cookies.set("cc_session", token)
+    client.cookies.set("cc_csrf", csrf)
+    return {"X-CSRF-Token": csrf}
 
 
 def drain(monkeypatch: pytest.MonkeyPatch, on: date = TODAY, max_jobs: int = 50) -> int:

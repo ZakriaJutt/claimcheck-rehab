@@ -175,6 +175,9 @@ def get_import_payload(batch_id: uuid.UUID, p: Principal = Depends(principal_dep
         data = read_payload(get_store(), p.clinic_id, key)
     except ObjectMissing:
         raise ApiError(404, "payload_not_kept", "This import's rows are not kept any more.") from None
+    except PermissionError:
+        # B2-S04: a stored key outside the caller's clinic prefix is a tampering signal: 404, audit, alert.
+        raise _not_found(engine, p, "import_batch", batch_id) from None
     with tenant_session(engine, p.clinic_id) as s:
         write_audit(s, "import_payload_downloaded", "ok", p.clinic_id, p.user_id, "import_batch", batch_id,
                     {"bytes": len(data)})

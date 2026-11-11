@@ -8,7 +8,7 @@ import secrets
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Engine, select
 
@@ -19,6 +19,7 @@ from claimcheck_api.deps import (
     Principal,
     check_csrf,
     client_ip,
+    csrf_for_session,
     engine_dep,
     owner_dep,
     principal_dep,
@@ -70,8 +71,9 @@ def _cookie(response: Response, name: str, value: str, *, http_only: bool, same_
                         httponly=http_only, samesite=same_site)  # type: ignore[arg-type]
 
 
-def _set_csrf(response: Response) -> str:
-    token = secrets.token_urlsafe(32)
+def _set_csrf(response: Response, session_token: str | None = None) -> str:
+    """Bound to the session when there is one (B2-S03); otherwise a random double-submit value."""
+    token = csrf_for_session(session_token) if session_token else secrets.token_urlsafe(32)
     _cookie(response, CSRF_COOKIE, token, http_only=False, same_site="strict")
     return token
 
@@ -88,9 +90,10 @@ def _clear_pending(response: Response) -> None:
 
 
 @router.get("/auth/csrf")
-def get_csrf(response: Response) -> dict[str, str]:
-    """Issues the anti-forgery token before the first write (sign-in included, against login CSRF)."""
-    return {"csrf": _set_csrf(response)}
+def get_csrf(request: Request, response: Response) -> dict[str, str]:
+    """Issues the anti-forgery token before the first write (sign-in included, against login CSRF); with a
+    session cookie, the token of that session."""
+    return {"csrf": _set_csrf(response, request.cookies.get(get_settings().session_cookie_name))}
 
 
 @router.post("/auth/sign-in")
@@ -141,7 +144,7 @@ def post_mfa(body: MfaIn, request: Request, response: Response,
         raise ApiError(401, "bad_code", "That code is not right. Use the current code from your app.")
     _cookie(response, get_settings().session_cookie_name, r.session_token, http_only=True, same_site="lax")
     _clear_pending(response)
-    csrf = _set_csrf(response)  # a new anti-forgery token with the new session
+    csrf = _set_csrf(response, r.session_token)  # the new session's own anti-forgery token
     out: dict[str, Any] = {"role": r.role, "csrf": csrf}
     if r.recovery_codes:
         out["recovery_codes"] = r.recovery_codes
@@ -150,9 +153,10 @@ def post_mfa(body: MfaIn, request: Request, response: Response,
 
 @router.post("/auth/sign-out", status_code=204)
 def post_sign_out(request: Request, response: Response, engine: Engine = Depends(engine_dep)) -> Response:
-    check_csrf(request)
     name = get_settings().session_cookie_name
     token = request.cookies.get(name)
+    # A live session is signed out only with its own anti-forgery token; a dead one with the plain pair.
+    check_csrf(request, bind=token is not None and service.session_is_live(engine, token))
     if token:
         service.sign_out(engine, token)
     pending = request.cookies.get(PENDING_COOKIE)
@@ -174,13 +178,21 @@ def get_me(p: Principal = Depends(principal_dep)) -> dict[str, str]:
 RESET_ANSWER = {"message": "If this address has an account, we have sent it a link."}
 
 
-@router.post("/auth/reset-request", status_code=202)
-def post_reset_request(body: EmailIn, request: Request, engine: Engine = Depends(engine_dep)) -> dict[str, str]:
-    check_csrf(request)
-    out = service.request_reset(engine, body.email, client_ip(request))
+def _send_reset(engine: Engine, email: str) -> None:
+    out = service.issue_reset(engine, email)
     if out is not None:
         send_safely(get_mailer(), reset_mail(out[0], out[1], get_settings().reset_minutes), "password_reset")
-    return RESET_ANSWER  # the same answer whether or not the address exists, and when rate-limited
+
+
+@router.post("/auth/reset-request", status_code=202)
+def post_reset_request(body: EmailIn, request: Request, background: BackgroundTasks,
+                       engine: Engine = Depends(engine_dep)) -> dict[str, str]:
+    """The same answer, and the same work before answering, whether or not the address exists (B2-S06):
+    the lookup, the reset row and the email run after the response is sent."""
+    check_csrf(request)
+    if service.reset_allowed(engine, body.email, client_ip(request)):
+        background.add_task(_send_reset, engine, body.email)
+    return RESET_ANSWER  # also when rate-limited
 
 
 @router.post("/auth/reset")
