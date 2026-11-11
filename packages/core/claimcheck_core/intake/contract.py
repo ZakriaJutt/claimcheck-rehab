@@ -28,7 +28,7 @@ VISIT_KEYS = frozenset(VISIT_FIELDS) | {"row_no", "line_no"}
 CLAIM_KEYS = frozenset(CLAIM_FIELDS) | {"row_no"}
 assert len(ALLOWED_FIELDS) == 16
 
-PAYERS = frozenset({"ICBC", "WSBC", "OTHER"})
+PAYERS = frozenset({"ICBC", "WSBC", "OTHER", "UNKNOWN"})  # UNKNOWN: wording not recognised (B1-007)
 STATES = frozenset({"unsubmitted", "submitted", "rejected", "partly_paid", "paid", "unknown"})
 DISCIPLINES = frozenset({"physiotherapy", "support", "other"})
 POLICY_STATUSES = frozenset({"open", "closed", "other"})
@@ -44,7 +44,7 @@ MAX_AMOUNT = Decimal("2000")
 VISIT_REQUIRED = ("invoice_ref", "date_of_service", "payer", "billing_code", "amount_invoiced",
                   "submission_state", "discipline")
 CLAIM_REQUIRED = ("claim_token", "payer")
-REJECT_REASONS = frozenset({"missing_required", "duplicate_row"})
+REJECT_REASONS = frozenset({"missing_required", "duplicate_row", "conflicting_duplicate"})
 
 
 @dataclass(frozen=True)

@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import re
 import uuid
-from collections import Counter
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, select
 
 from claimcheck_api.deps import ApiError, Principal, engine_dep, owner_dep, principal_dep, today_dep
 from claimcheck_core.alerts import default_alerter
@@ -29,8 +28,8 @@ from claimcheck_core.imports import (
 )
 from claimcheck_core.intake.contract import ContractError
 from claimcheck_core.intake.guard import GuardFailure
+from claimcheck_core.lists import banner, reasons, summary_sentence, week_counts
 from claimcheck_core.logging import get_correlation_id
-from claimcheck_core.measure import nothing_needs_action_sentence
 from claimcheck_core.models import AuditEvent, ExportProfile, Finding, ImportBatch, ImportRow, Item, Visit
 from claimcheck_core.money import ZERO, cad
 from claimcheck_core.outcomes import InvalidEvent, StaleVersion, record_event
@@ -200,11 +199,7 @@ def get_items(view: str = "week", p: Principal = Depends(principal_dep), engine:
         raise ApiError(422, "invalid_request", "Only view=week exists in this build.")
     with tenant_session(engine, p.clinic_id) as s:
         fr = freshness(s, datetime.now(tz=UTC), today)
-        counts = dict(s.execute(select(Visit.check_status, func.count()).group_by(Visit.check_status)).all())
-        unevaluated = int(s.scalar(select(func.count()).select_from(Visit).where(Visit.check_status.is_(None))) or 0)
-        partly = int(s.scalar(select(func.count(func.distinct(Finding.visit_id))).join(
-            Visit, Visit.id == Finding.visit_id).where(
-            Visit.check_status == "in_scope", Finding.outcome == "not_evaluated")) or 0)
+        wc = week_counts(s)
         rows = s.execute(
             select(Item, Visit, Finding).outerjoin(Visit, Visit.id == Item.visit_id).outerjoin(
                 Finding, (Finding.rule_code == Item.rule_code) & (
@@ -218,26 +213,13 @@ def get_items(view: str = "week", p: Principal = Depends(principal_dep), engine:
             t = totals.setdefault(i.money_class, {"count": 0, "amount": ZERO})
             t["count"] += 1
             t["amount"] = cad(t["amount"] + (i.amount or Decimal(0)))
-        cnc = s.execute(select(Visit).where(Visit.check_status == "could_not_check")
-                        .order_by(Visit.date_of_service, Visit.invoice_ref, Visit.line_no)).scalars().all()
-        groups["could_not_check"] = [
-            {"visit_id": str(v.id), "invoice_ref": v.invoice_ref, "payer": v.payer,
-             "date_of_service": v.date_of_service.isoformat(), "reason": v.check_reason} for v in cnc]
-        reasons = Counter(v.check_reason for v in cnc)
-    c = {"checked": int(counts.get("in_scope", 0)), "could_not_check": int(counts.get("could_not_check", 0)),
-         "no_rules_applied": int(counts.get("no_rules_applied", 0)), "not_yet_evaluated": unevaluated,
-         "checked_with_rules_not_evaluated": partly}
+        groups["could_not_check"] = wc.not_checked_rows
     open_items = sum(len(groups[g]) for g in GROUP_ORDER if g != "could_not_check")
-    summary = None
-    if open_items == 0 and unevaluated == 0 and fr.last_evaluated_at is not None:
-        summary = nothing_needs_action_sentence(c["checked"], c["could_not_check"], c["no_rules_applied"])
-    banner = None
-    if c["could_not_check"]:
-        banner = f"{c['could_not_check']} visits could not be checked. They are not fine."
+    summary = summary_sentence(wc, open_items, fr.last_evaluated_at is not None)
     return {
-        "counts": c, "could_not_check_reasons": dict(reasons),
+        "counts": wc.as_dict(), "could_not_check_reasons": reasons(wc),
         "totals": {k: {"count": v["count"], "amount": str(v["amount"])} for k, v in sorted(totals.items())},
-        "groups": groups, "summary": summary, "banner": banner,
+        "groups": groups, "summary": summary, "banner": banner(wc),
         "freshness": {
             "last_export_date": fr.last_export_date.isoformat() if fr.last_export_date else None,
             "last_evaluated_at": fr.last_evaluated_at.isoformat() if fr.last_evaluated_at else None,

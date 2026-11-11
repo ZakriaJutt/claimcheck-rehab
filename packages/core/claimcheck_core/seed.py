@@ -33,18 +33,37 @@ def publish_profiles(conn: Connection) -> None:
              "req": section["required"]})
 
 
+class CatalogueDrift(SystemExit):
+    """A published version differs from the code catalogue under the same (rule_code, version)."""
+
+
 def publish_rules(conn: Connection, fixtures_passed: bool) -> int:
+    """Insert missing versions. A stored version whose dates, parameters or citation differ from the
+    catalogue under the same version number refuses publication (B1-009): a changed fee needs a new
+    version, never a silent no-op."""
     if not fixtures_passed:
         raise SystemExit("publication refused: rule fixtures have not passed in this run")
     now = datetime.now(tz=UTC)
+    stored = {(r.rule_code, r.version): r for r in conn.execute(text(
+        "SELECT rule_code, version, effective_from, effective_to, params, source_citation, source_id "
+        "FROM rule_version"))}
+    drift = []
+    for v in catalogue_versions():
+        r = stored.get((v.rule_code, v.version))
+        if r is not None and (r.effective_from, r.effective_to, r.params, r.source_citation, r.source_id) != (
+                v.effective_from, v.effective_to, v.params, v.source_citation, v.source_id):
+            drift.append(f"{v.rule_code} v{v.version}")
+    if drift:
+        raise CatalogueDrift("publication refused: stored versions differ from the catalogue: " + ", ".join(drift))
     n = 0
     for v in catalogue_versions():
-        res = conn.execute(text(
+        if (v.rule_code, v.version) in stored:
+            continue
+        conn.execute(text(
             "INSERT INTO rule_version (id, rule_code, version, effective_from, effective_to, params, "
             "source_citation, source_id, status, fixtures_passed_at, published_at) VALUES "
-            "(:id, :c, :ver, :f, :t, CAST(:p AS jsonb), :cite, :src, 'published', :now, :now) "
-            "ON CONFLICT (rule_code, version) DO NOTHING"),
+            "(:id, :c, :ver, :f, :t, CAST(:p AS jsonb), :cite, :src, 'published', :now, :now)"),
             {"id": v.id, "c": v.rule_code, "ver": v.version, "f": v.effective_from, "t": v.effective_to,
              "p": json.dumps(v.params), "cite": v.source_citation, "src": v.source_id, "now": now})
-        n += res.rowcount
+        n += 1
     return n

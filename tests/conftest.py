@@ -26,7 +26,7 @@ def _load_env_file() -> dict[str, str]:
 
 
 _file_env = _load_env_file()
-for key in ("TEST_DATABASE_URL", "TEST_MIGRATION_DATABASE_URL"):
+for key in ("TEST_DATABASE_URL", "TEST_MIGRATION_DATABASE_URL", "TEST_WORKER_DATABASE_URL"):
     if key not in os.environ and key in _file_env:
         os.environ[key] = _file_env[key]
 os.environ["APP_ENV"] = "test"

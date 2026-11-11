@@ -184,26 +184,31 @@ def finalize(engine: Engine, clinic_id: uuid.UUID, batch_id: uuid.UUID, today: d
             alerter.alert(s, "guard_rejection", clinic_id, rows=sum(f.rows for f in failures))
             return batch.status
 
+        # B1-001: rows that cannot be used stay visible with a reason from a fixed list. Rows sharing a
+        # key are an exact repeat (one kept, the rest counted as repeats) or a conflict (none kept: the
+        # product cannot tell which is right, so every one of them "could not be checked").
         accepted: list[tuple[str, dict[str, Any]]] = []
         rejected = duplicate = 0
-        seen_v: set[tuple[str, int]] = set()
-        seen_c: set[tuple[str, str]] = set()
+        groups: dict[tuple[str, Any], list[tuple[ImportRow, dict[str, Any]]]] = {}
         for row, p in parsed:
             if missing_required(row.kind, p):
                 row.reject_reason = "missing_required"
                 rejected += 1
                 continue
-            key_v = (p["invoice_ref"], p["line_no"]) if row.kind == "visit" else None
-            key_c = (p["claim_token"], p["payer"]) if row.kind == "claim" else None
-            if (key_v and key_v in seen_v) or (key_c and key_c in seen_c):
+            key = (row.kind, (p["invoice_ref"], p["line_no"]) if row.kind == "visit"
+                   else (p["claim_token"], p["payer"]))
+            groups.setdefault(key, []).append((row, p))
+        for (kind, _), members in groups.items():
+            bodies = {repr(sorted((k, v) for k, v in p.items() if k != "row_no")) for _, p in members}
+            if len(bodies) > 1:
+                for row, _p in members:
+                    row.reject_reason = "conflicting_duplicate"
+                    rejected += 1
+                continue
+            accepted.append((kind, members[0][1]))
+            for row, _p in members[1:]:
                 row.reject_reason = "duplicate_row"
                 duplicate += 1
-                continue
-            if key_v:
-                seen_v.add(key_v)
-            if key_c:
-                seen_c.add(key_c)
-            accepted.append((row.kind, p))
 
         claim_ids = _upsert_claims(s, clinic_id, batch, [p for k, p in accepted if k == "claim"],
                                    [p for k, p in accepted if k == "visit"])
@@ -274,7 +279,6 @@ def _upsert_visits(
         paid = cad(p.get("amount_paid") or 0)
         invoiced = cad(p["amount_invoiced"])
         claim_id = claim_ids.get((p["claim_token"], p["payer"])) if p.get("claim_token") else None
-        rejected_on = p.get("state_date") if state == "rejected" else None
         snap = {"submission_state": state, "amount_invoiced": invoiced, "amount_paid": paid,
                 "state_date": p.get("state_date")}
         v = existing.get((p["invoice_ref"], p["line_no"]))
@@ -283,14 +287,12 @@ def _upsert_visits(
             v = Visit(clinic_id=clinic_id, invoice_ref=p["invoice_ref"], line_no=p["line_no"], claim_id=claim_id,
                       payer=p["payer"], discipline=p["discipline"], date_of_service=p["date_of_service"],
                       billing_code=p["billing_code"], amount_invoiced=invoiced, amount_paid=paid,
-                      submission_state=state, state_date=p.get("state_date"), first_rejected_on=rejected_on,
+                      submission_state=state, state_date=p.get("state_date"),
                       first_seen_batch_id=batch.id, first_seen_export_date=batch.export_date,
                       last_batch_id=batch.id, last_export_date=batch.export_date)
             s.add(v)
             existing[(v.invoice_ref, v.line_no)] = v
         else:
-            if rejected_on is not None and (v.first_rejected_on is None or rejected_on < v.first_rejected_on):
-                v.first_rejected_on = rejected_on  # earliest rejection date Jane exported
             if batch.export_date < v.first_seen_export_date:
                 v.first_seen_export_date = batch.export_date
             if batch.export_date >= v.last_export_date:

@@ -61,6 +61,20 @@ def app_engine(owner_engine: Engine) -> Iterator[Engine]:
     yield eng
 
 
+@pytest.fixture(scope="session")
+def worker_engine(owner_engine: Engine) -> Iterator[Engine]:
+    """The worker's own role (B1-008): the only role that may run the cross-clinic queue functions."""
+    url = os.environ.get("TEST_WORKER_DATABASE_URL")
+    if not url:
+        pytest.skip("TEST_WORKER_DATABASE_URL not set")
+    eng = create_engine(url)
+    with eng.connect() as c:
+        assert c.execute(text("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user")
+                         ).scalar() is False
+    yield eng
+    eng.dispose()
+
+
 @pytest.fixture(autouse=True)
 def _clean(request: pytest.FixtureRequest) -> None:
     if "owner_engine" not in request.fixturenames and "app_engine" not in request.fixturenames:
@@ -127,9 +141,11 @@ def as_user(client: TestClient, ctx: ClinicCtx, role: str = "staff") -> dict[str
 
 
 def drain(monkeypatch: pytest.MonkeyPatch, on: date = TODAY, max_jobs: int = 50) -> int:
-    """Run due jobs in-process the way the worker does, with a fixed local date."""
+    """Run due jobs in-process the way the worker does (as the worker role), with a fixed local date."""
     import claimcheck_worker.main as worker
+    eng = create_engine(os.environ["TEST_WORKER_DATABASE_URL"])
     monkeypatch.setattr(worker, "local_today", lambda: on)
+    monkeypatch.setattr(worker, "get_engine", lambda: eng)
     n = 0
     while n < max_jobs and worker.process_one():
         n += 1

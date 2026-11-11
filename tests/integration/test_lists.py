@@ -32,15 +32,14 @@ def test_e2e09_api_unknown_states_listed_and_never_fine(api: TestClient, harbour
     upload(api, harbourview, rows.visits, rows.claims)
     drain(monkeypatch)
     body = _items(api, harbourview)
-    assert body["counts"]["checked"] == 970
-    assert body["counts"]["could_not_check"] == 43
-    assert body["counts"]["no_rules_applied"] == 171
+    v = body["counts"]["visits"]
+    assert (v["checked"], v["could_not_check"], v["no_rules_applied"]) == (970, 43, 171)
+    assert body["counts"]["adds_up"] is True and body["counts"]["rows_received"] == 1184 + 388
     assert len(body["groups"]["could_not_check"]) == 43
     assert {x["reason"] for x in body["groups"]["could_not_check"]} == {"unknown_state"}
-    assert body["banner"] == "43 visits could not be checked. They are not fine."
-    s = body["summary"]
-    assert s is not None and "970" in s and "43 could not be checked" in s and "171 had no rules applied" in s
-    assert "fine" not in s.replace("not cleared", "")
+    assert body["banner"] == "43 could not be checked. They are not fine."
+    # Fix round 1 ruling (B1-001): "nothing needs action" only when every row was checked.
+    assert body["summary"] is None
 
 
 def test_nothing_needs_action_not_said_before_evaluation(api: TestClient, harbourview: ClinicCtx) -> None:
@@ -181,4 +180,4 @@ def test_could_not_check_share_alert(api: TestClient, harbourview: ClinicCtx, ap
     drain(monkeypatch)
     with tenant_session(app_engine, harbourview.id) as s:
         assert "could_not_check_share" in set(s.scalars(select(AuditEvent.outcome)))
-    assert _items(api, harbourview)["banner"] == "212 visits could not be checked. They are not fine."
+    assert _items(api, harbourview)["banner"] == "212 could not be checked. They are not fine."
