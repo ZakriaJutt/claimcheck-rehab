@@ -117,3 +117,17 @@ def test_b1_008_api_role_cannot_run_queue_functions(app_engine: Engine, harbourv
                 "SELECT cc_enqueue_per_clinic('x', 'y', '{}'::jsonb, gen_random_uuid())"):
         with pytest.raises(ProgrammingError), tenant_session(app_engine, seawall.id) as s:
             s.execute(text(sql))
+
+
+def test_b1_008_queue_functions_have_a_dedicated_non_superuser_owner(owner_engine: Engine) -> None:
+    with owner_engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT p.proname, r.rolname, r.rolsuper, r.rolbypassrls, r.rolcanlogin, p.prosecdef, p.proconfig "
+            "FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner "
+            "WHERE p.proname IN ('cc_job_claim','cc_job_complete','cc_job_expire_leases','cc_enqueue_per_clinic')"
+        )).all()
+    assert len(rows) == 4
+    for name, owner, sup, bypass, login, secdef, config in rows:
+        assert (owner, sup, bypass, login, secdef) == ("claimcheck_queue_owner", False, False, False, True), name
+        sp = next(x for x in config if x.startswith("search_path="))
+        assert sp.split("=", 1)[1].replace(" ", "").split(",")[-1] == "pg_temp", name

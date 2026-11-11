@@ -57,7 +57,7 @@ def test_ut03_wsbc_correction_window_arithmetic_as_catalogued() -> None:
 
 def test_ut03_wsbc_correction_window_inside_loaded_versions() -> None:
     known = visit(payer="WSBC", billing_code="19102", amount_invoiced="95.00", date_of_service="2026-05-01",
-                  submission_state="rejected", rejected_not_before=D("2026-08-20"))
+                  submission_state="rejected", rejected_not_before=D("2026-08-20"), rejected_by=D("2026-08-20"))
     r = result(run([known], on="2026-09-01"), known.id, "WSBC-02")
     assert (r.outcome, r.limit_date, r.money_class) == ("flag", D("2026-11-18"), "delayed_cash")
     assert not r.near_limit
@@ -67,7 +67,9 @@ def test_ut03_wsbc_correction_window_inside_loaded_versions() -> None:
     assert r.limit_date == D("2026-10-28")  # service + 180, the earliest value the rule allows
     assert result(run([unknown], on="2026-10-14"), unknown.id, "WSBC-02").near_limit  # 14 days left
     assert not result(run([unknown], on="2026-10-13"), unknown.id, "WSBC-02").near_limit
-    assert result(run([unknown], on="2026-10-29"), unknown.id, "WSBC-02").money_class == "permanent_certain"
+    # B1-010: with no date by which the first rejection had happened, the loss is never called certain
+    late = result(run([unknown], on="2026-10-29"), unknown.id, "WSBC-02")
+    assert (late.money_class, late.reason, late.latest_limit) == ("delayed_cash", "check_first_rejection_date", None)
 
 
 # ------------------------------------------------------------------ UT-04

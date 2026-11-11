@@ -323,6 +323,7 @@ class Finding(Base):
     reason_code: Mapped[str | None] = mapped_column(Text)
     limit_date: Mapped[date | None] = mapped_column(Date)
     submit_by: Mapped[date | None] = mapped_column(Date)
+    latest_limit_date: Mapped[date | None] = mapped_column(Date)
     evaluation_run_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("evaluation_run.id"), nullable=False
     )

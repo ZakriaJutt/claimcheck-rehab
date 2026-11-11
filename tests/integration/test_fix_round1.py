@@ -112,7 +112,13 @@ def test_b1_003_rerejection_before_first_export_gives_earliest_limit(
     items = [x for g, xs in _week(api, harbourview)["groups"].items() if g != "could_not_check" for x in xs
              if x["rule_code"] == "WSBC-02"]
     assert len(items) == 1
-    assert items[0]["limit_date"] == "2026-10-28" and items[0]["money_class"] == "permanent_certain"
+    # Round 2 (B1-010): act by 2026-10-28, but certain loss only after 09-15 + 90 = 2026-12-14.
+    assert items[0]["limit_date"] == "2026-10-28" and items[0]["latest_limit_date"] == "2026-12-14"
+    assert items[0]["money_class"] == "delayed_cash" and items[0]["reason"] == "check_first_rejection_date"
+    evaluate_clinic(app_engine, harbourview.id, date(2026, 12, 15))
+    items = [x for g, xs in _week(api, harbourview)["groups"].items() if g == "lost" for x in xs
+             if x["rule_code"] == "WSBC-02"]
+    assert len(items) == 1 and items[0]["money_class"] == "permanent_certain"
 
 
 def test_b1_003_observed_unsubmitted_gives_a_bound_that_is_never_later(

@@ -95,12 +95,27 @@ def rejection_lower_bounds(s: Session) -> dict[uuid.UUID, date]:
     return out
 
 
-def _visit_in(v: Visit, portal: str | None, not_before: date | None = None) -> VisitIn:
+def rejection_upper_bounds(s: Session) -> dict[uuid.UUID, date]:
+    """B1-010: per visit, a date by which the first rejection had certainly happened: the first snapshot
+    (by export date) showing `rejected`, using its state date when Jane exported one (the rejection then
+    current, which is no earlier than the first), else its export date."""
+    out: dict[uuid.UUID, date] = {}
+    q = select(VisitSnapshot.visit_id, VisitSnapshot.export_date, VisitSnapshot.state_date).where(
+        VisitSnapshot.submission_state == "rejected").order_by(
+        VisitSnapshot.visit_id, VisitSnapshot.export_date, VisitSnapshot.created_at)
+    for vid, export_date, state_date in s.execute(q):
+        if vid not in out:
+            out[vid] = min(export_date, state_date) if state_date else export_date
+    return out
+
+
+def _visit_in(v: Visit, portal: str | None, not_before: date | None = None,
+              rejected_by: date | None = None) -> VisitIn:
     return VisitIn(id=v.id, invoice_ref=v.invoice_ref, payer=v.payer, discipline=v.discipline,
                    date_of_service=v.date_of_service, billing_code=v.billing_code,
                    amount_invoiced=v.amount_invoiced, amount_paid=v.amount_paid,
                    submission_state=v.submission_state, line_no=v.line_no, state_date=v.state_date,
-                   rejected_not_before=not_before, claim_id=v.claim_id,
+                   rejected_not_before=not_before, rejected_by=rejected_by, claim_id=v.claim_id,
                    portal_status=portal)  # type: ignore[arg-type]
 
 
@@ -161,7 +176,10 @@ def evaluate_clinic(
         claims = list(s.scalars(select(Claim)))
         portal, last_outcome = _portal_and_outcomes(s)
         bounds = rejection_lower_bounds(s)
-        vin = [_visit_in(v, portal.get(v.id), bounds.get(v.id)) for v in visits.values()]
+        uppers = rejection_upper_bounds(s)
+        vin = [_visit_in(v, portal.get(v.id), bounds.get(v.id),
+                         uppers.get(v.id) or (v.last_export_date if v.submission_state == "rejected" else None))
+               for v in visits.values()]
         ev = evaluate(vin, [_claim_in(c) for c in claims], versions, on_date)
 
         items: dict[tuple[str, uuid.UUID, str], Item] = {}
@@ -230,7 +248,8 @@ def _persist_findings(s: Session, clinic_id: uuid.UUID, run_id: uuid.UUID, on_da
             "clinic_id": clinic_id, "visit_id": f.target_id if f.target == "visit" else None,
             "claim_id": f.target_id if f.target == "claim" else None, "rule_code": r.rule_code,
             "rule_version_id": r.version_id, "outcome": r.outcome, "reason_code": r.reason,
-            "limit_date": r.limit_date, "submit_by": r.submit_by, "evaluation_run_id": run_id,
+            "limit_date": r.limit_date, "submit_by": r.submit_by, "latest_limit_date": r.latest_limit,
+            "evaluation_run_id": run_id,
             "evaluated_on": on_date,
         })
     for target, batch in rows.items():
@@ -240,7 +259,8 @@ def _persist_findings(s: Session, clinic_id: uuid.UUID, run_id: uuid.UUID, on_da
             s.execute(stmt.on_conflict_do_update(
                 index_elements=[col, "rule_code"], index_where=Finding.__table__.c[col].isnot(None),
                 set_={k: stmt.excluded[k] for k in ("rule_version_id", "outcome", "reason_code", "limit_date",
-                                                    "submit_by", "evaluation_run_id", "evaluated_on")}))
+                                                    "submit_by", "latest_limit_date", "evaluation_run_id",
+                                                    "evaluated_on")}))
 
 
 def _apply_item(

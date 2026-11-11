@@ -76,6 +76,10 @@ class VisitIn:
     # B1-003: a date before which the product KNOWS no rejection had happened (the export date of the
     # last snapshot in the initial run of "unsubmitted" observations). Never a guessed rejection date.
     rejected_not_before: date | None = None
+    # B1-010: a date by which the first rejection had certainly happened (the first snapshot showing
+    # `rejected`: its state date, or its export date). With both bounds the true PR-08 limit lies
+    # between max(service + 180, not_before + 90) and max(service + 180, rejected_by + 90).
+    rejected_by: date | None = None
     claim_id: uuid.UUID | None = None
     # Staff outcome on the ICBC-07 item: ICBC's portal does not have it / it was verified there.
     portal_status: PortalStatus = None
@@ -106,6 +110,9 @@ class Result:
     money_class: MoneyClass | None = None
     amount: Decimal | None = None
     near_limit: bool = False
+    # B1-010: when the true limit is uncertain, `limit_date` is the earliest possible limit ("act by")
+    # and `latest_limit` the latest possible one; loss is certain only after `latest_limit`.
+    latest_limit: date | None = None
 
 
 @dataclass(frozen=True)

@@ -76,6 +76,9 @@ class AuditFigures:
     near_limit: NearLimitMonthly
     permanent_icbc: PermanentLossMonthly
     wsbc_past_limit_balance: Decimal  # no monthly conversion; does not enter the test
+    # B1-010: WSBC-02 past the earliest but not the latest possible limit: at risk, may still be
+    # collectable; never counted as permanent loss.
+    wsbc_at_risk_balance: Decimal = ZERO
 
 
 def audit_figures(evaluation: Evaluation, visits: list[VisitIn], audit_date: date) -> AuditFigures:
@@ -84,6 +87,7 @@ def audit_figures(evaluation: Evaluation, visits: list[VisitIn], audit_date: dat
     certain: dict[uuid.UUID, Decimal] = {}
     discretionary: dict[uuid.UUID, Decimal] = {}
     wsbc_past = ZERO
+    wsbc_at_risk = ZERO
     for f in evaluation.findings:
         r = f.result
         if f.target != "visit" or r.outcome != "flag":
@@ -100,6 +104,8 @@ def audit_figures(evaluation: Evaluation, visits: list[VisitIn], audit_date: dat
                 discretionary[v.id] = amount
         if r.rule_code in ("WSBC-01", "WSBC-02") and r.money_class.startswith("permanent"):  # type: ignore[union-attr]
             wsbc_past += amount
+        elif r.rule_code == "WSBC-02" and r.reason == "check_first_rejection_date":
+            wsbc_at_risk += amount
     for vid in certain:  # certain wins; never count one visit on both lines
         discretionary.pop(vid, None)
     c_bal = cad(sum(certain.values(), ZERO))
@@ -110,6 +116,7 @@ def audit_figures(evaluation: Evaluation, visits: list[VisitIn], audit_date: dat
             c_bal, d_bal, cad(c_bal / PERMANENT_COHORT_MONTHS), cad(d_bal / PERMANENT_COHORT_MONTHS)
         ),
         wsbc_past_limit_balance=cad(wsbc_past),
+        wsbc_at_risk_balance=cad(wsbc_at_risk),
     )
 
 

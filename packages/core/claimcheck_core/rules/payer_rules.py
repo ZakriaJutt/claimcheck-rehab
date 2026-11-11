@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal
 
@@ -100,6 +100,19 @@ def wsbc_correction_limit(
     if rejected_not_before is not None:
         limit = max(limit, add_days(rejected_not_before, rejection_days))
     return limit
+
+
+def wsbc_correction_bounds(
+    date_of_service: date, rejected_not_before: date | None, rejected_by: date | None,
+    service_days: int = 180, rejection_days: int = 90,
+) -> tuple[date, date | None]:
+    """(earliest possible, latest possible) PR-08 limit (B1-010). The latest is None when no date is
+    known by which the first rejection had happened; then the loss is never called certain."""
+    earliest = wsbc_correction_limit(date_of_service, rejected_not_before, service_days, rejection_days)
+    if rejected_by is None:
+        return earliest, None
+    latest = max(add_days(date_of_service, service_days), add_days(rejected_by, rejection_days))
+    return earliest, max(latest, earliest)
 
 
 # ---------------------------------------------------------------- ICBC visit rules
@@ -275,15 +288,23 @@ def wsbc_02(v: VisitIn, ver: RuleVersionIn, ctx: Context) -> Result:
         return _ne(code, ver, R_UNKNOWN_STATE)
     if v.submission_state != "rejected":
         return _clear(code, ver)
-    limit = wsbc_correction_limit(v.date_of_service, v.rejected_not_before,
-                                  p["service_limit_days"], p["rejection_limit_days"])
-    submit_by = add_days(limit, -1)
-    if ctx.on_date > limit:
-        return _flag(code, ver, "past_correction_limit", "permanent_certain", outstanding(v),
-                     limit, submit_by, near_limit=True)
-    near = days_since(ctx.on_date, limit) <= p["near_limit_days"]
-    return _flag(code, ver, "rejected_earliest_limit", "delayed_cash", outstanding(v), limit, submit_by,
-                 near_limit=near)
+    earliest, latest = wsbc_correction_bounds(v.date_of_service, v.rejected_not_before, v.rejected_by,
+                                              p["service_limit_days"], p["rejection_limit_days"])
+    submit_by = add_days(earliest, -1)
+    if latest is not None and ctx.on_date > latest:
+        # Even the latest possible PR-08 limit has passed: the loss is certain.
+        res = _flag(code, ver, "past_correction_limit", "permanent_certain", outstanding(v),
+                    earliest, submit_by, near_limit=True)
+    elif ctx.on_date > earliest:
+        # B1-010: past the earliest possible limit but not the latest: at risk, may still be collectable.
+        # Never written off; staff confirm the first rejection date in Teleplan.
+        res = _flag(code, ver, "check_first_rejection_date", "delayed_cash", outstanding(v),
+                    earliest, submit_by, near_limit=True)
+    else:
+        near = days_since(ctx.on_date, earliest) <= p["near_limit_days"]
+        res = _flag(code, ver, "rejected_earliest_limit", "delayed_cash", outstanding(v), earliest, submit_by,
+                    near_limit=near)
+    return replace(res, latest_limit=latest)
 
 
 def wsbc_03(v: VisitIn, ver: RuleVersionIn, ctx: Context) -> Result:

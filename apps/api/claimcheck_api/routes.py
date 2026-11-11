@@ -185,6 +185,8 @@ def _item_row(i: Item, v: Visit | None, f: Finding | None, today: date) -> dict[
         "date_of_service": v.date_of_service.isoformat() if v else None,
         "limit_date": i.limit_date.isoformat() if i.limit_date else None,
         "submit_by": f.submit_by.isoformat() if f and f.submit_by else None,
+        # B1-010: when set, the true limit lies between limit_date ("act by") and this date.
+        "latest_limit_date": f.latest_limit_date.isoformat() if f and f.latest_limit_date else None,
         "days_left": (i.limit_date - today).days if i.limit_date else None,
         "amount": str(i.amount) if i.amount is not None else None, "money_class": i.money_class,
         "status": i.status, "version": i.version,
